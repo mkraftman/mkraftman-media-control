@@ -1,0 +1,6 @@
+{
+  "name": "Mkraftman Media Control",
+  "render_readme": true,
+  "filename": "mkraftman-media-control.js",
+  "homeassistant": "2024.1.0"
+}
