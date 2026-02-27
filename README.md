@@ -32,7 +32,7 @@ A custom media control card for Home Assistant.
 ## Usage
 
 ```yaml
-type: custom:custom-media-control-card
+type: custom:mkraftman-media-control
 entity: media_player.your_entity
 ```
 
