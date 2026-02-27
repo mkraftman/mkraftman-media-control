@@ -14,7 +14,7 @@
 
 const SKIP_SECONDS = 10;
 
-class CustomMediaControlCard extends HTMLElement {
+class MkraftmanMediaControl extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -862,12 +862,12 @@ class CustomMediaControlCard extends HTMLElement {
 /*  Registration                                                         */
 /* -------------------------------------------------------------------- */
 
-customElements.define("custom-media-control-card", CustomMediaControlCard);
+customElements.define("mkraftman-media-control", MkraftmanMediaControl);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "custom-media-control-card",
-  name: "Custom Media Control",
+  type: "mkraftman-media-control",
+  name: "Mkraftman Media Control",
   description:
     "Modified media control card: no power/menu/browse, full-width transport controls, draggable seek, right-aligned artwork.",
 });
