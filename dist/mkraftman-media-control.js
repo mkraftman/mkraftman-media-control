@@ -204,7 +204,7 @@ class MkraftmanMediaControl extends HTMLElement {
         margin-bottom: 4px;
       }
       .name {
-        font-size: 21px;
+        font-size: 18px;
         font-weight: 500;
         opacity: 0.85;
         white-space: nowrap;
@@ -223,7 +223,7 @@ class MkraftmanMediaControl extends HTMLElement {
         min-height: 0;
       }
       .title {
-        font-size: 27px;
+        font-size: 22px;
         font-weight: 600;
         white-space: nowrap;
         overflow: hidden;
@@ -276,7 +276,7 @@ class MkraftmanMediaControl extends HTMLElement {
         max-width: 132px;
       }
       .ctrl.pp ha-icon {
-        --mdc-icon-size: 78px;
+        --mdc-icon-size: 65px;
       }
       .ctrl.skip ha-icon {
         --mdc-icon-size: 28px;
@@ -335,7 +335,7 @@ class MkraftmanMediaControl extends HTMLElement {
       .times {
         display: flex;
         justify-content: space-between;
-        font-size: 12px;
+        font-size: 18px;
         opacity: 0.6;
         margin-top: 4px;
         color: var(--mc-fg);
@@ -458,7 +458,7 @@ class MkraftmanMediaControl extends HTMLElement {
     // events
     btnMap.sb.btn.addEventListener("click", () => this._seekRelative(-SKIP_SECONDS));
     btnMap.prev.btn.addEventListener("click", () => this._callService("media_previous_track"));
-    btnMap.pp.btn.addEventListener("click", () => this._callService("media_play_pause"));
+    btnMap.pp.btn.addEventListener("click", () => this._handlePlayPause());
     btnMap.next.btn.addEventListener("click", () => this._callService("media_next_track"));
     btnMap.sf.btn.addEventListener("click", () => this._seekRelative(SKIP_SECONDS));
     bar.addEventListener("click", (e) => {
@@ -588,14 +588,15 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // top row — entity name when idle, app name when playing
     const isActive = ["playing", "paused", "buffering"].includes(state);
+    const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
     el.name.textContent = isActive
-      ? (a.app_name || a.friendly_name || this._config.entity)
+      ? (appName || a.friendly_name || this._config.entity)
       : (a.friendly_name || this._config.entity);
 
-    // media info — just title, no secondary
+    // media info — title always reserves space to prevent card height shift
     const hasTitle = !!a.media_title;
-    el.title.textContent = a.media_title || "";
-    el.title.classList.toggle("hidden", !hasTitle);
+    el.title.textContent = a.media_title || "\u00A0";
+    el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
     const statusText = isOff ? state : "";
     el.status.textContent = statusText;
@@ -777,6 +778,25 @@ class MkraftmanMediaControl extends HTMLElement {
   /* ------------------------------------------------------------------ */
   /*  Service calls                                                      */
   /* ------------------------------------------------------------------ */
+
+  _handlePlayPause() {
+    if (!this._hass || !this._config) return;
+    const entity = this._hass.states[this._config.entity];
+    if (!entity) return;
+
+    if (["idle", "standby"].includes(entity.state)) {
+      // After screensaver, media_play_pause doesn't work; send select via remote
+      const remoteId = this._config.entity.replace("media_player.", "remote.");
+      if (this._hass.states[remoteId]) {
+        this._hass.callService("remote", "send_command", {
+          entity_id: remoteId,
+          command: "select",
+        });
+        return;
+      }
+    }
+    this._callService("media_play_pause");
+  }
 
   _callService(service, data) {
     if (!this._hass || !this._config) return;
