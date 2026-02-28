@@ -203,14 +203,8 @@ class MkraftmanMediaControl extends HTMLElement {
         gap: 8px;
         margin-bottom: 4px;
       }
-      .top ha-icon {
-        --mdc-icon-size: 24px;
-        flex-shrink: 0;
-        opacity: 0.85;
-        color: var(--mc-fg);
-      }
       .name {
-        font-size: 14px;
+        font-size: 21px;
         font-weight: 500;
         opacity: 0.85;
         white-space: nowrap;
@@ -229,21 +223,13 @@ class MkraftmanMediaControl extends HTMLElement {
         min-height: 0;
       }
       .title {
-        font-size: 18px;
+        font-size: 27px;
         font-weight: 600;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         color: var(--mc-fg);
         margin-bottom: 2px;
-      }
-      .secondary {
-        font-size: 14px;
-        opacity: 0.7;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--mc-fg);
       }
       .status {
         flex: 1;
@@ -287,10 +273,13 @@ class MkraftmanMediaControl extends HTMLElement {
         color: var(--mc-fg);
       }
       .ctrl.pp {
-        max-width: 88px;
+        max-width: 132px;
       }
       .ctrl.pp ha-icon {
-        --mdc-icon-size: 52px;
+        --mdc-icon-size: 78px;
+      }
+      .ctrl.skip ha-icon {
+        --mdc-icon-size: 28px;
       }
       .ctrl:hover  { background-color: rgba(255,255,255,0.1); }
       .ctrl:active { background-color: rgba(255,255,255,0.2); }
@@ -380,10 +369,9 @@ class MkraftmanMediaControl extends HTMLElement {
     const top = document.createElement("div");
     top.className = "top";
 
-    const icon = document.createElement("ha-icon");
     const name = document.createElement("span");
     name.className = "name";
-    top.append(icon, name);
+    top.append(name);
 
     // info
     const info = document.createElement("div");
@@ -392,24 +380,21 @@ class MkraftmanMediaControl extends HTMLElement {
     const title = document.createElement("div");
     title.className = "title";
 
-    const secondary = document.createElement("div");
-    secondary.className = "secondary";
-
     const status = document.createElement("div");
     status.className = "status";
 
-    info.append(title, secondary, status);
+    info.append(title, status);
 
     // controls
     const controls = document.createElement("div");
     controls.className = "controls";
 
     const btns = [
-      { id: "sb", icon: "mdi:rewind-10", cls: "ctrl" },
+      { id: "sb", icon: "mdi:rewind-10", cls: "ctrl skip" },
       { id: "prev", icon: "mdi:skip-previous", cls: "ctrl" },
       { id: "pp", icon: "mdi:play", cls: "ctrl pp" },
       { id: "next", icon: "mdi:skip-next", cls: "ctrl" },
-      { id: "sf", icon: "mdi:fast-forward-10", cls: "ctrl" },
+      { id: "sf", icon: "mdi:fast-forward-10", cls: "ctrl skip" },
     ];
 
     const btnMap = {};
@@ -457,10 +442,8 @@ class MkraftmanMediaControl extends HTMLElement {
       bgColor,
       bgImage,
       bgGrad,
-      icon,
       name,
       title,
-      secondary,
       status,
       info,
       btnMap,
@@ -603,35 +586,18 @@ class MkraftmanMediaControl extends HTMLElement {
     // card off styling
     el.card.classList.toggle("off", isOff);
 
-    // icon & name
-    const iconName =
-      a.icon ||
-      (a.device_class === "tv"
-        ? "mdi:television"
-        : a.device_class === "speaker"
-          ? "mdi:speaker"
-          : a.device_class === "receiver"
-            ? "mdi:audio-video"
-            : "mdi:cast");
-    el.icon.setAttribute("icon", iconName);
-    el.name.textContent = a.friendly_name || this._config.entity;
+    // top row — entity name when idle, app name when playing
+    const isActive = ["playing", "paused", "buffering"].includes(state);
+    el.name.textContent = isActive
+      ? (a.app_name || a.friendly_name || this._config.entity)
+      : (a.friendly_name || this._config.entity);
 
-    // media info
+    // media info — just title, no secondary
     const hasTitle = !!a.media_title;
     el.title.textContent = a.media_title || "";
     el.title.classList.toggle("hidden", !hasTitle);
 
-    const sec = a.media_artist || a.app_name || "";
-    el.secondary.textContent = sec;
-    el.secondary.classList.toggle("hidden", !hasTitle || !sec);
-
-    const statusText = isOff
-      ? state
-      : ["idle", "standby"].includes(state)
-        ? state
-        : hasTitle
-          ? ""
-          : "No media";
+    const statusText = isOff ? state : "";
     el.status.textContent = statusText;
     el.status.classList.toggle("hidden", hasTitle);
 
@@ -677,7 +643,7 @@ class MkraftmanMediaControl extends HTMLElement {
     const el = this._el;
     if (!el.bgColor) return;
 
-    const bg = this._customBg || "var(--card-background-color, var(--ha-card-background, #1c1c1c))";
+    const bg = this._customBg || "#132532";
     const fg = this._customFg || "var(--primary-text-color, #fff)";
 
     el.bgColor.style.backgroundColor = bg;
