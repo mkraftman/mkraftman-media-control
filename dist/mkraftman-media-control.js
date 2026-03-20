@@ -6,13 +6,59 @@
  *  - No power button
  *  - No three-dots menu
  *  - No browse media button
- *  - Always-visible full-width controls: skip back, previous, play/pause, next, skip forward
+ *  - Configurable transport buttons (default: skip back, previous, play/pause, next, skip forward)
  *  - Draggable seek thumb on progress bar
  *  - Right-aligned artwork with colour fade to left
  *  - Background resets to default on app change or return to home screen
+ *
+ * Config options:
+ *   entity:        (required) media_player entity
+ *   remote_entity: (optional) remote entity for send_command actions
+ *   buttons:       (optional) array of button definitions:
+ *     - icon: mdi icon name
+ *       command: remote command string (uses remote_entity)
+ *     - primary: true  (play/pause button, auto-toggles icon)
  */
 
 const SKIP_SECONDS = 10;
+
+const APP_IMAGE_MAP = {
+  "Netflix": "/local/images/netflix.png",
+  "Prime Video": "/local/images/prime-video.png",
+  "YouTube": "/local/images/youtube.png",
+  "Disney+": "/local/images/disney-plus.png",
+  "Disney Plus": "/local/images/disney-plus.png",
+  "Apple Music": "/local/images/apple-music.png",
+  "Spotify": "/local/images/spotify.png",
+  "Plex": "/local/images/plex.png",
+  "BBC iPlayer": "/local/images/bbc-iplayer.png",
+  "ITVX": "/local/images/itvx.png",
+  "ITV Hub": "/local/images/itvx.png",
+  "Channel 4": "/local/images/channel4.png",
+  "All 4": "/local/images/channel4.png",
+  "My5": "/local/images/my5.png",
+  "Channel 5": "/local/images/my5.png",
+  "Paramount+": "/local/images/paramount-plus.png",
+  "Paramount Plus": "/local/images/paramount-plus.png",
+  "discovery+": "/local/images/discovery-plus.png",
+  "Discovery+": "/local/images/discovery-plus.png",
+  "HBO Max": "/local/images/hbo-max.png",
+  "Max": "/local/images/hbo-max.png",
+  "Hulu": "/local/images/hulu.png",
+  "DAZN": "/local/images/dazn.png",
+  "Roon": "/local/images/roon.png",
+  "BBC Sounds": "/local/images/bbc-sounds.png",
+  "TV": "/local/images/apple-tv.png",
+  "com.apple.TVWatchList": "/local/images/apple-tv.png",
+  "Starz": "/local/images/starz.png",
+  "STARZ": "/local/images/starz.png",
+  "Sky Q": "/local/images/sky.png",
+  "Sky": "/local/images/sky.png",
+  "Peacock": "/local/images/peacock.png",
+  "U": "/local/images/u.png",
+  "UKTV": "/local/images/u.png",
+  "UKTV Play": "/local/images/u.png"
+};
 
 class MkraftmanMediaControl extends HTMLElement {
   constructor() {
@@ -154,6 +200,7 @@ class MkraftmanMediaControl extends HTMLElement {
         overflow: hidden;
         height: 100%;
         box-sizing: border-box;
+        background: #132532;
         transition: filter 0.3s, opacity 0.3s;
       }
       ha-card.off {
@@ -389,13 +436,7 @@ class MkraftmanMediaControl extends HTMLElement {
     const controls = document.createElement("div");
     controls.className = "controls";
 
-    const btns = [
-      { id: "sb", icon: "mdi:rewind-10", cls: "ctrl skip" },
-      { id: "prev", icon: "mdi:skip-previous", cls: "ctrl" },
-      { id: "pp", icon: "mdi:play", cls: "ctrl pp" },
-      { id: "next", icon: "mdi:skip-next", cls: "ctrl" },
-      { id: "sf", icon: "mdi:fast-forward-10", cls: "ctrl skip" },
-    ];
+    const btns = this._getButtonDefs();
 
     const btnMap = {};
     for (const b of btns) {
@@ -455,12 +496,22 @@ class MkraftmanMediaControl extends HTMLElement {
       dur,
     };
 
-    // events
-    btnMap.sb.btn.addEventListener("click", () => this._seekRelative(-SKIP_SECONDS));
-    btnMap.prev.btn.addEventListener("click", () => this._callService("media_previous_track"));
-    btnMap.pp.btn.addEventListener("click", () => this._handlePlayPause());
-    btnMap.next.btn.addEventListener("click", () => this._callService("media_next_track"));
-    btnMap.sf.btn.addEventListener("click", () => this._seekRelative(SKIP_SECONDS));
+    // events — wire up each button based on its action type
+    const buttonDefs = this._getButtonDefs();
+    for (const b of buttonDefs) {
+      if (!btnMap[b.id]) continue;
+      const handler = () => {
+        switch (b.action) {
+          case "play_pause": this._handlePlayPause(); break;
+          case "previous": this._callService("media_previous_track"); break;
+          case "next": this._callService("media_next_track"); break;
+          case "skip_back": this._seekRelative(-SKIP_SECONDS); break;
+          case "skip_forward": this._seekRelative(SKIP_SECONDS); break;
+          case "remote_command": this._sendRemoteCommand(b.command); break;
+        }
+      };
+      btnMap[b.id].btn.addEventListener("click", handler);
+    }
     bar.addEventListener("click", (e) => {
       if (!this._dragging) this._seekAbsolute(e);
     });
@@ -486,6 +537,35 @@ class MkraftmanMediaControl extends HTMLElement {
     this._built = true;
 
     if (this._hass) this._update();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  Button definitions                                                 */
+  /* ------------------------------------------------------------------ */
+
+  _getButtonDefs() {
+    if (this._config.buttons) {
+      return this._config.buttons.map((b, i) => {
+        if (b.primary) {
+          return { id: "pp", icon: "mdi:play", cls: "ctrl pp", action: "play_pause" };
+        }
+        return {
+          id: "btn" + i,
+          icon: b.icon,
+          cls: "ctrl",
+          action: "remote_command",
+          command: b.command,
+        };
+      });
+    }
+    // Default: Apple TV style
+    return [
+      { id: "sb", icon: "mdi:rewind-10", cls: "ctrl skip", action: "skip_back" },
+      { id: "prev", icon: "mdi:skip-previous", cls: "ctrl", action: "previous" },
+      { id: "pp", icon: "mdi:play", cls: "ctrl pp", action: "play_pause" },
+      { id: "next", icon: "mdi:skip-next", cls: "ctrl", action: "next" },
+      { id: "sf", icon: "mdi:fast-forward-10", cls: "ctrl skip", action: "skip_forward" },
+    ];
   }
 
   /* ------------------------------------------------------------------ */
@@ -588,14 +668,17 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // top row — entity name when idle, app name when playing
     const isActive = ["playing", "paused", "buffering"].includes(state);
+    const hasRealPic = !!(a.entity_picture || a.entity_picture_local);
+    // Treat paused with no artwork as "at rest" (Apple TV leaves stale data on home screen)
+    const isTrulyActive = isActive && (isPlaying || hasRealPic);
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
-    el.name.textContent = isActive
+    el.name.textContent = isTrulyActive
       ? (appName || a.friendly_name || this._config.entity)
       : (a.friendly_name || this._config.entity);
 
-    // media info — title always reserves space to prevent card height shift
-    const hasTitle = !!a.media_title;
-    el.title.textContent = a.media_title || "\u00A0";
+    // media info — only show title when truly active
+    const hasTitle = isTrulyActive && !!a.media_title;
+    el.title.textContent = hasTitle ? a.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
     const statusText = isOff ? state : "";
@@ -606,9 +689,15 @@ class MkraftmanMediaControl extends HTMLElement {
     el.btnMap.pp.ic.setAttribute("icon", isPlaying ? "mdi:pause" : "mdi:play");
 
     // artwork background
-    const pic = a.entity_picture || a.entity_picture_local || null;
-    if (pic && this._customBg) {
-      el.bgImage.style.backgroundImage = "url('" + pic + "')";
+    const realPic = a.entity_picture || a.entity_picture_local || null;
+    const fallbackPic = (!realPic && isPlaying && a.media_title && a.app_name)
+      ? (APP_IMAGE_MAP[a.app_name] || null) : null;
+    if (realPic && this._customBg) {
+      el.bgImage.style.backgroundImage = "url('" + realPic + "')";
+      el.bgImage.style.opacity = "1";
+      this._updateBgSize();
+    } else if (fallbackPic) {
+      el.bgImage.style.backgroundImage = "url('" + fallbackPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
     } else {
@@ -786,7 +875,8 @@ class MkraftmanMediaControl extends HTMLElement {
 
     if (["idle", "standby"].includes(entity.state)) {
       // After screensaver, media_play_pause doesn't work; send select via remote
-      const remoteId = this._config.entity.replace("media_player.", "remote.");
+      const remoteId = this._config.remote_entity ||
+        this._config.entity.replace("media_player.", "remote.");
       if (this._hass.states[remoteId]) {
         this._hass.callService("remote", "send_command", {
           entity_id: remoteId,
@@ -796,6 +886,17 @@ class MkraftmanMediaControl extends HTMLElement {
       }
     }
     this._callService("media_play_pause");
+  }
+
+  _sendRemoteCommand(command) {
+    if (!this._hass || !this._config) return;
+    const remoteEntity = this._config.remote_entity ||
+      this._config.entity.replace("media_player.", "remote.");
+    if (!remoteEntity) return;
+    this._hass.callService("remote", "send_command", {
+      entity_id: remoteEntity,
+      command: command,
+    });
   }
 
   _callService(service, data) {
