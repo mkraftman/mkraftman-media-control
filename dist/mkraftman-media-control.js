@@ -680,14 +680,20 @@ class MkraftmanMediaControl extends HTMLElement {
     const el = this._el;
 
     const isOff = state === "off" || state === "unavailable";
-    const isPlaying = state === "playing";
+    const hasRealPic = !!(a.entity_picture || a.entity_picture_local);
+
+    // Roku reports "playing" with short phantom durations during menu/home nav;
+    // treat that as idle so we don't flip the icon, show fallback art, etc.
+    const MIN_DURATION = 60;
+    const isPhantomPlay = state === "playing" && !hasRealPic
+      && a.media_duration > 0 && a.media_duration < MIN_DURATION;
+    const isPlaying = state === "playing" && !isPhantomPlay;
 
     // card off styling
     el.card.classList.toggle("off", isOff);
 
     // top row — entity name when idle, app name when playing
-    const isActive = ["playing", "paused", "buffering"].includes(state);
-    const hasRealPic = !!(a.entity_picture || a.entity_picture_local);
+    const isActive = ["playing", "paused", "buffering"].includes(state) && !isPhantomPlay;
     // Treat paused with no artwork as "at rest" (Apple TV leaves stale data on home screen)
     const isTrulyActive = isActive && (isPlaying || hasRealPic);
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
@@ -737,7 +743,6 @@ class MkraftmanMediaControl extends HTMLElement {
     }
     if (dur > 0) this._prevMediaDuration = dur;
 
-    const MIN_DURATION = 60;
     const hasProg =
       dur >= MIN_DURATION && a.media_position !== undefined && a.media_position !== null && !this._isLiveStream;
     el.prog.classList.toggle("no-progress", !hasProg);
