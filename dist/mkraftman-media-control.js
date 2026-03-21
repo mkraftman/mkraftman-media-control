@@ -685,7 +685,7 @@ class MkraftmanMediaControl extends HTMLElement {
     // Roku reports "playing" with short phantom durations during menu/home nav;
     // treat that as idle so we don't flip the icon, show fallback art, etc.
     const MIN_DURATION = 60;
-    const isPhantomPlay = state === "playing" && !hasRealPic
+    const isPhantomPlay = state === "playing"
       && a.media_duration > 0 && a.media_duration < MIN_DURATION;
     const isPlaying = state === "playing" && !isPhantomPlay;
 
@@ -713,8 +713,9 @@ class MkraftmanMediaControl extends HTMLElement {
     // play / pause icon
     el.btnMap.pp.ic.setAttribute("icon", isPlaying ? "mdi:pause" : "mdi:play");
 
-    // artwork background
-    const realPic = a.entity_picture || a.entity_picture_local || null;
+    // artwork background — suppress during phantom plays
+    const realPic = !isPhantomPlay
+      ? (a.entity_picture || a.entity_picture_local || null) : null;
     const fallbackPic = (!realPic && isPlaying && a.app_name)
       ? (APP_IMAGE_MAP[a.app_name] || null) : null;
     if (realPic && this._customBg) {
