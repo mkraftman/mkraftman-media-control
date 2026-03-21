@@ -690,7 +690,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // artwork background
     const realPic = a.entity_picture || a.entity_picture_local || null;
-    const fallbackPic = (!realPic && isPlaying && a.media_title && a.app_name)
+    const fallbackPic = (!realPic && isPlaying && a.app_name)
       ? (APP_IMAGE_MAP[a.app_name] || null) : null;
     if (realPic && this._customBg) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
