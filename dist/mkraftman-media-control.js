@@ -325,6 +325,10 @@ class MkraftmanMediaControl extends HTMLElement {
       .ctrl.pp ha-icon {
         --mdc-icon-size: 65px;
       }
+      .ctrl.spacer {
+        pointer-events: none;
+        visibility: hidden;
+      }
       .ctrl.skip ha-icon {
         --mdc-icon-size: 28px;
       }
@@ -549,10 +553,14 @@ class MkraftmanMediaControl extends HTMLElement {
         if (b.primary) {
           return { id: "pp", icon: "mdi:play", cls: "ctrl pp", action: "play_pause" };
         }
+        if (b.spacer) {
+          return { id: "spacer" + i, icon: "", cls: "ctrl spacer", action: "none" };
+        }
+        const cls = b.size === "skip" ? "ctrl skip" : "ctrl";
         return {
           id: "btn" + i,
           icon: b.icon,
-          cls: "ctrl",
+          cls: cls,
           action: "remote_command",
           command: b.command,
         };
@@ -708,8 +716,12 @@ class MkraftmanMediaControl extends HTMLElement {
     }
 
     // progress — use visibility:hidden to reserve space (no card height shift)
+    // Hide for live TV: position near end of a long duration (DVR buffer pattern)
+    const isLive = a.media_duration > 3600 &&
+      a.media_position !== undefined &&
+      (a.media_duration - this._currentPos(entity)) < 30;
     const hasProg =
-      a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null;
+      a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null && !isLive;
     el.prog.classList.toggle("no-progress", !hasProg);
 
     if (hasProg && !this._dragging) {
