@@ -78,6 +78,8 @@ class MkraftmanMediaControl extends HTMLElement {
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
+    this._prevMediaDuration = null;
+    this._isLiveStream = false;
     this._resizeObserver = null;
     this._resizeTimeout = null;
   }
@@ -148,16 +150,20 @@ class MkraftmanMediaControl extends HTMLElement {
 
     if (!this._built) this._build();
 
-    // Detect app change -> reset background
+    // Detect app change -> reset background and live stream flag
     const app = entity.attributes.app_name || null;
     if (this._prevAppName !== undefined && app !== this._prevAppName) {
       this._clearColors();
+      this._isLiveStream = false;
+      this._prevMediaDuration = null;
     }
     this._prevAppName = app;
 
-    // Idle / off / standby -> reset background
+    // Idle / off / standby -> reset background and live stream flag
     if (["idle", "standby", "off", "unavailable"].includes(entity.state)) {
       this._clearColors();
+      this._isLiveStream = false;
+      this._prevMediaDuration = null;
     }
 
     // New artwork -> extract colours
@@ -516,12 +522,17 @@ class MkraftmanMediaControl extends HTMLElement {
       };
       btnMap[b.id].btn.addEventListener("click", handler);
     }
-    bar.addEventListener("click", (e) => {
-      if (!this._dragging) this._seekAbsolute(e);
-    });
-
-    // drag support for seek thumb
-    this._initDrag();
+    // Seek support — disabled by seekable: false config
+    const seekable = this._config.seekable !== false;
+    if (seekable) {
+      bar.addEventListener("click", (e) => {
+        if (!this._dragging) this._seekAbsolute(e);
+      });
+      this._initDrag();
+    } else {
+      thumb.style.display = "none";
+      bar.style.cursor = "default";
+    }
 
     // ResizeObserver for artwork sizing
     this._resizeObserver = new ResizeObserver((entries) => {
@@ -716,12 +727,18 @@ class MkraftmanMediaControl extends HTMLElement {
     }
 
     // progress — use visibility:hidden to reserve space (no card height shift)
-    // Hide for live TV: position near end of a long duration (DVR buffer pattern)
-    const isLive = a.media_duration > 3600 &&
-      a.media_position !== undefined &&
-      (a.media_duration - this._currentPos(entity)) < 120;
+    // Detect live TV: duration growing over time means DVR buffer (live stream)
+    const dur = a.media_duration;
+    if (dur > 0 && this._prevMediaDuration !== null && dur > this._prevMediaDuration + 2) {
+      this._isLiveStream = true;
+    } else if (dur > 0 && this._prevMediaDuration !== null && dur < this._prevMediaDuration - 2) {
+      // Duration decreased significantly = new content, reset
+      this._isLiveStream = false;
+    }
+    if (dur > 0) this._prevMediaDuration = dur;
+
     const hasProg =
-      a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null && !isLive;
+      dur > 0 && a.media_position !== undefined && a.media_position !== null && !this._isLiveStream;
     el.prog.classList.toggle("no-progress", !hasProg);
 
     if (hasProg && !this._dragging) {
