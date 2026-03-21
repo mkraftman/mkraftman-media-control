@@ -166,19 +166,22 @@ class MkraftmanMediaControl extends HTMLElement {
       this._prevMediaDuration = null;
     }
 
-    // New artwork -> extract colours
+    // New artwork -> extract colours (skip phantom plays with short durations)
     const pic =
       entity.attributes.entity_picture ||
       entity.attributes.entity_picture_local ||
       null;
+    const dur = entity.attributes.media_duration;
+    const phantom = entity.state === "playing" && dur > 0 && dur < 60;
     if (
       pic &&
       pic !== this._lastPicture &&
-      ["playing", "paused", "buffering"].includes(entity.state)
+      ["playing", "paused", "buffering"].includes(entity.state) &&
+      !phantom
     ) {
       this._lastPicture = pic;
       this._extractColors(pic);
-    } else if (!pic && this._lastPicture) {
+    } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
       this._clearColors();
     }
@@ -294,7 +297,7 @@ class MkraftmanMediaControl extends HTMLElement {
         color: var(--mc-fg);
         text-transform: capitalize;
       }
-      .hidden { display: none !important; }
+      .hidden { visibility: hidden !important; }
 
       /* controls */
       .controls {
