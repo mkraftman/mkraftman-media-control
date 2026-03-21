@@ -476,7 +476,9 @@ class MkraftmanMediaControl extends HTMLElement {
     times.className = "times";
 
     const pos = document.createElement("span");
+    pos.textContent = "\u00A0";
     const dur = document.createElement("span");
+    dur.textContent = "\u00A0";
     times.append(pos, dur);
 
     prog.append(bar, times);
