@@ -172,7 +172,7 @@ class MkraftmanMediaControl extends HTMLElement {
       entity.attributes.entity_picture_local ||
       null;
     const dur = entity.attributes.media_duration;
-    const phantom = entity.state === "playing" && dur > 0 && dur < 60;
+    const phantom = entity.state === "playing" && dur > 0 && dur < 10;
     if (
       pic &&
       pic !== this._lastPicture &&
@@ -682,11 +682,12 @@ class MkraftmanMediaControl extends HTMLElement {
     const isOff = state === "off" || state === "unavailable";
     const hasRealPic = !!(a.entity_picture || a.entity_picture_local);
 
-    // Roku reports "playing" with short phantom durations during menu/home nav;
+    // Roku reports "playing" with ~3s phantom durations during menu/home nav;
     // treat that as idle so we don't flip the icon, show fallback art, etc.
+    const PHANTOM_THRESHOLD = 10;
     const MIN_DURATION = 60;
     const isPhantomPlay = state === "playing"
-      && a.media_duration > 0 && a.media_duration < MIN_DURATION;
+      && a.media_duration > 0 && a.media_duration < PHANTOM_THRESHOLD;
     const isPlaying = state === "playing" && !isPhantomPlay;
 
     // card off styling
