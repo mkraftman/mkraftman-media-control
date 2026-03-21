@@ -218,7 +218,7 @@ class MkraftmanMediaControl extends HTMLElement {
       }
 
       /* --- background layers --- */
-      .bg { position: absolute; inset: 0; }
+      .bg { position: absolute; inset: 0; overflow: hidden; }
       .bg-color {
         position: absolute; inset: 0;
         transition: background-color 0.8s ease;
@@ -297,7 +297,7 @@ class MkraftmanMediaControl extends HTMLElement {
         color: var(--mc-fg);
         text-transform: capitalize;
       }
-      .hidden { visibility: hidden !important; }
+      .hidden { display: none !important; }
 
       /* controls */
       .controls {
@@ -405,6 +405,9 @@ class MkraftmanMediaControl extends HTMLElement {
 
     /* --- structure --- */
     const card = document.createElement("ha-card");
+    // Force overflow clipping — ha-card shadow DOM may override CSS rules
+    card.style.overflow = "hidden";
+    card.style.position = "relative";
 
     // background
     const bg = document.createElement("div");
