@@ -288,16 +288,8 @@ class MkraftmanMediaControl extends HTMLElement {
         margin-bottom: 2px;
       }
       .status {
-        flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 16px;
-        opacity: 0.4;
-        color: var(--mc-fg);
-        text-transform: capitalize;
+        display: none;
       }
-      .hidden { display: none !important; }
 
       /* controls */
       .controls {
@@ -711,10 +703,6 @@ class MkraftmanMediaControl extends HTMLElement {
     const hasTitle = isTrulyActive && !!a.media_title;
     el.title.textContent = hasTitle ? a.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
-
-    const statusText = isOff ? state : "";
-    el.status.textContent = statusText;
-    el.status.classList.toggle("hidden", hasTitle);
 
     // play / pause icon
     el.btnMap.pp.ic.setAttribute("icon", isPlaying ? "mdi:pause" : "mdi:play");
