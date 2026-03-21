@@ -719,7 +719,7 @@ class MkraftmanMediaControl extends HTMLElement {
     // Hide for live TV: position near end of a long duration (DVR buffer pattern)
     const isLive = a.media_duration > 3600 &&
       a.media_position !== undefined &&
-      (a.media_duration - this._currentPos(entity)) < 30;
+      (a.media_duration - this._currentPos(entity)) < 120;
     const hasProg =
       a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null && !isLive;
     el.prog.classList.toggle("no-progress", !hasProg);
