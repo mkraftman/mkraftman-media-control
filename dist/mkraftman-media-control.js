@@ -737,8 +737,9 @@ class MkraftmanMediaControl extends HTMLElement {
     }
     if (dur > 0) this._prevMediaDuration = dur;
 
+    const MIN_DURATION = 60;
     const hasProg =
-      dur > 0 && a.media_position !== undefined && a.media_position !== null && !this._isLiveStream;
+      dur >= MIN_DURATION && a.media_position !== undefined && a.media_position !== null && !this._isLiveStream;
     el.prog.classList.toggle("no-progress", !hasProg);
 
     if (hasProg && !this._dragging) {
