@@ -124,6 +124,14 @@ class MkraftmanMediaControl extends HTMLElement {
       clearTimeout(this._resizeTimeout);
       this._resizeTimeout = null;
     }
+    // Clear artwork cache so we start fresh on reconnect —
+    // prevents stale artwork showing after app switches while away
+    this._clearColors();
+    this._lastPicture = null;
+    this._prevAppName = undefined;
+    this._prevMediaDuration = null;
+    this._isLiveStream = false;
+    this._hass = null;
   }
 
   /* ------------------------------------------------------------------ */
