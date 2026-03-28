@@ -23,7 +23,7 @@
 const SKIP_SECONDS = 10;
 
 const DEVICE_IMAGE_MAP = {
-  "apple_tv": "/local/images/apple-tv.png",
+  "apple_tv": "/local/images/apple.png",
   "roku": "/local/images/roku.png",
 };
 
