@@ -22,6 +22,11 @@
 
 const SKIP_SECONDS = 10;
 
+const DEVICE_IMAGE_MAP = {
+  "apple_tv": "/local/images/apple-tv.png",
+  "roku": "/local/images/roku.png",
+};
+
 const APP_IMAGE_MAP = {
   "Netflix": "/local/images/netflix.png",
   "Prime Video": "/local/images/prime-video.png",
@@ -732,10 +737,18 @@ class MkraftmanMediaControl extends HTMLElement {
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
     } else {
-      el.bgImage.style.opacity = "0";
-      el.bgImage.style.width = "0";
-      el.bgGrad.style.opacity = "0";
-      el.bgGrad.style.width = "0";
+      // Show device image as default background, or hide if none
+      const devicePic = this._deviceImage();
+      if (devicePic) {
+        el.bgImage.style.backgroundImage = "url('" + devicePic + "')";
+        el.bgImage.style.opacity = "1";
+        this._updateBgSize();
+      } else {
+        el.bgImage.style.opacity = "0";
+        el.bgImage.style.width = "0";
+        el.bgGrad.style.opacity = "0";
+        el.bgGrad.style.width = "0";
+      }
     }
 
     // progress — use visibility:hidden to reserve space (no card height shift)
@@ -973,6 +986,15 @@ class MkraftmanMediaControl extends HTMLElement {
   /* ------------------------------------------------------------------ */
   /*  Utilities                                                          */
   /* ------------------------------------------------------------------ */
+
+  _deviceImage() {
+    if (!this._config || !this._config.entity) return null;
+    const id = this._config.entity;
+    for (const key in DEVICE_IMAGE_MAP) {
+      if (id.includes(key)) return DEVICE_IMAGE_MAP[key];
+    }
+    return null;
+  }
 
   _formatTime(sec) {
     if (sec === undefined || sec === null || isNaN(sec)) return "";
