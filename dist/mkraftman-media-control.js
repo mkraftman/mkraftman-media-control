@@ -25,6 +25,7 @@ const SKIP_SECONDS = 10;
 const DEVICE_IMAGE_MAP = {
   "apple_tv": "/local/images/apple.png",
   "roku": "/local/images/roku.png",
+  "google_tv": "/local/images/google-tv.png",
 };
 
 const APP_IMAGE_MAP = {
@@ -928,13 +929,13 @@ class MkraftmanMediaControl extends HTMLElement {
     if (!entity) return;
 
     if (["idle", "standby"].includes(entity.state)) {
-      // After screensaver, media_play_pause doesn't work; send select via remote
+      // After screensaver, media_play_pause doesn't work; send wake command via remote
       const remoteId = this._config.remote_entity ||
         this._config.entity.replace("media_player.", "remote.");
       if (this._hass.states[remoteId]) {
         this._hass.callService("remote", "send_command", {
           entity_id: remoteId,
-          command: "select",
+          command: this._config.wake_command || "select",
         });
         return;
       }
