@@ -731,11 +731,16 @@ class MkraftmanMediaControl extends HTMLElement {
     const isActive = ["playing", "paused", "buffering"].includes(state) && !isPhantomPlay;
     // When paused, treat as active if:
     // - we have extracted colours from a prior playing state (genuine pause), OR
-    // - there's a title but no pic (e.g. BBC iPlayer on Google TV — real content, no artwork)
+    // - there's a title but no pic (e.g. BBC iPlayer on Google TV — real content, no artwork), OR
+    // - on Google TV only: valid progress info (duration + position) — Cast clears this
+    //   reliably on home/app switch unlike Apple TV which keeps stale data
     // Apple TV stale data always has a pic, so the _customBg check catches that.
+    const isGoogleTV = this._config.entity && this._config.entity.includes("google_tv");
+    const hasProgress = a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null;
     const isTrulyActive = isActive && (isPlaying
       || (hasRealPic && this._customBg)
-      || (!hasRealPic && !!a.media_title));
+      || (!hasRealPic && !!a.media_title)
+      || (isGoogleTV && hasProgress));
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
     const friendlyName = (a.friendly_name || this._config.entity).replace(/ Universal$/, "");
     el.name.textContent = isTrulyActive
