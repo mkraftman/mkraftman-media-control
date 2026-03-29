@@ -784,9 +784,17 @@ class MkraftmanMediaControl extends HTMLElement {
     }
     if (dur > 0) this._prevMediaDuration = dur;
 
-    const hasProg =
+    const hasProg = isTrulyActive &&
       dur >= MIN_DURATION && a.media_position !== undefined && a.media_position !== null && !this._isLiveStream;
     el.prog.classList.toggle("no-progress", !hasProg);
+
+    if (!hasProg) {
+      // Reset progress display so stale data doesn't flash on next show
+      el.fill.style.width = "0%";
+      el.thumb.style.left = "0%";
+      el.pos.textContent = "\u00A0";
+      el.dur.textContent = "\u00A0";
+    }
 
     if (hasProg && !this._dragging) {
       const frac = this._fraction(entity);
