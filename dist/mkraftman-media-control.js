@@ -747,15 +747,18 @@ class MkraftmanMediaControl extends HTMLElement {
     el.title.textContent = hasTitle ? a.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
-    // play / pause icon — use toggle icon when state is ambiguous (e.g. "on")
-    const ppIcon = isPlaying ? "mdi:pause"
-      : (state === "on" ? "mdi:play-pause" : "mdi:play");
+    // play / pause icon — use toggle icon when state is ambiguous:
+    // "on" = no Cast info at all; "playing" with no media info = Cast state unreliable
+    const hasMediaInfo = !!(a.media_title || a.media_duration || a.entity_picture || a.entity_picture_local);
+    const ambiguousState = state === "on" || (isPlaying && !hasMediaInfo);
+    const ppIcon = ambiguousState ? "mdi:play-pause"
+      : (isPlaying ? "mdi:pause" : "mdi:play");
     el.btnMap.pp.ic.setAttribute("icon", ppIcon);
 
     // artwork background — suppress during phantom plays
     const realPic = !isPhantomPlay
       ? (a.entity_picture || a.entity_picture_local || null) : null;
-    const fallbackPic = (!realPic && isPlaying && a.app_name)
+    const fallbackPic = (!realPic && isTrulyActive && a.app_name)
       ? (APP_IMAGE_MAP[a.app_name] || null) : null;
     if (realPic && this._customBg) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
