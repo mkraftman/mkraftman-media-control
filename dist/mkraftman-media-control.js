@@ -729,9 +729,13 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // top row — entity name when idle, app name when playing
     const isActive = ["playing", "paused", "buffering"].includes(state) && !isPhantomPlay;
-    // When paused, only treat as active if we have extracted colours (from
-    // a prior playing state). Stale paused data after a clear shows default.
-    const isTrulyActive = isActive && (isPlaying || (hasRealPic && this._customBg));
+    // When paused, treat as active if:
+    // - we have extracted colours from a prior playing state (genuine pause), OR
+    // - there's a title but no pic (e.g. BBC iPlayer on Google TV — real content, no artwork)
+    // Apple TV stale data always has a pic, so the _customBg check catches that.
+    const isTrulyActive = isActive && (isPlaying
+      || (hasRealPic && this._customBg)
+      || (!hasRealPic && !!a.media_title));
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
     const friendlyName = (a.friendly_name || this._config.entity).replace(/ Universal$/, "");
     el.name.textContent = isTrulyActive
