@@ -130,10 +130,10 @@ class MkraftmanMediaControl extends HTMLElement {
       clearTimeout(this._resizeTimeout);
       this._resizeTimeout = null;
     }
-    // Clear visual state so we start fresh on reconnect —
-    // but keep _prevAppName so app change detection works on reconnect
+    // Clear artwork cache so we start fresh on reconnect
     this._clearColors();
     this._lastPicture = null;
+    this._prevAppName = undefined;
     this._prevMediaDuration = null;
     this._isLiveStream = false;
     this._hass = null;
@@ -169,11 +169,6 @@ class MkraftmanMediaControl extends HTMLElement {
       this._clearColors();
       this._isLiveStream = false;
       this._prevMediaDuration = null;
-      // Set _lastPicture to current pic so stale artwork isn't re-extracted
-      this._lastPicture =
-        entity.attributes.entity_picture ||
-        entity.attributes.entity_picture_local ||
-        null;
     }
     this._prevAppName = app;
 
