@@ -179,7 +179,9 @@ class MkraftmanMediaControl extends HTMLElement {
       this._prevMediaDuration = null;
     }
 
-    // New artwork -> extract colours (skip phantom plays with short durations)
+    // New artwork -> extract colours only when playing/buffering.
+    // Paused never triggers extraction — prevents stale Apple TV data
+    // from re-extracting after a clear (disconnect, app change, etc.)
     const pic =
       entity.attributes.entity_picture ||
       entity.attributes.entity_picture_local ||
@@ -189,11 +191,15 @@ class MkraftmanMediaControl extends HTMLElement {
     if (
       pic &&
       pic !== this._lastPicture &&
-      ["playing", "paused", "buffering"].includes(entity.state) &&
+      (entity.state === "playing" || entity.state === "buffering") &&
       !phantom
     ) {
       this._lastPicture = pic;
       this._extractColors(pic);
+    } else if (pic && pic !== this._lastPicture && entity.state === "paused") {
+      // Pic changed while paused — stale data; clear, don't extract
+      this._lastPicture = pic;
+      this._clearColors();
     } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
       this._clearColors();
@@ -708,8 +714,9 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // top row — entity name when idle, app name when playing
     const isActive = ["playing", "paused", "buffering"].includes(state) && !isPhantomPlay;
-    // Treat paused with no artwork as "at rest" (Apple TV leaves stale data on home screen)
-    const isTrulyActive = isActive && (isPlaying || hasRealPic);
+    // When paused, only treat as active if we have extracted colours (from
+    // a prior playing state). Stale paused data after a clear shows default.
+    const isTrulyActive = isActive && (isPlaying || (hasRealPic && this._customBg));
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
     el.name.textContent = isTrulyActive
       ? (appName || a.friendly_name || this._config.entity)
