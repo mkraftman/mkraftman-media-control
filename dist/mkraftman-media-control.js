@@ -758,7 +758,7 @@ class MkraftmanMediaControl extends HTMLElement {
     // artwork background — suppress during phantom plays
     const realPic = !isPhantomPlay
       ? (a.entity_picture || a.entity_picture_local || null) : null;
-    const fallbackPic = (!realPic && isTrulyActive && a.app_name)
+    const fallbackPic = (isTrulyActive && a.app_name)
       ? (APP_IMAGE_MAP[a.app_name] || null) : null;
     if (realPic && this._customBg) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
