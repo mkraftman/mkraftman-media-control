@@ -733,17 +733,20 @@ class MkraftmanMediaControl extends HTMLElement {
     // a prior playing state). Stale paused data after a clear shows default.
     const isTrulyActive = isActive && (isPlaying || (hasRealPic && this._customBg));
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
+    const friendlyName = (a.friendly_name || this._config.entity).replace(/ Universal$/, "");
     el.name.textContent = isTrulyActive
-      ? (appName || a.friendly_name || this._config.entity)
-      : (a.friendly_name || this._config.entity);
+      ? (appName || friendlyName)
+      : friendlyName;
 
     // media info — only show title when truly active
     const hasTitle = isTrulyActive && !!a.media_title;
     el.title.textContent = hasTitle ? a.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
-    // play / pause icon
-    el.btnMap.pp.ic.setAttribute("icon", isPlaying ? "mdi:pause" : "mdi:play");
+    // play / pause icon — use toggle icon when state is ambiguous (e.g. "on")
+    const ppIcon = isPlaying ? "mdi:pause"
+      : (state === "on" ? "mdi:play-pause" : "mdi:play");
+    el.btnMap.pp.ic.setAttribute("icon", ppIcon);
 
     // artwork background — suppress during phantom plays
     const realPic = !isPhantomPlay
