@@ -54,6 +54,7 @@ const APP_IMAGE_MAP = {
   "DAZN": "/local/images/dazn.png",
   "Roon": "/local/images/roon.png",
   "BBC Sounds": "/local/images/bbc-sounds.png",
+  "Apple TV": "/local/images/apple-tv.png",
   "TV": "/local/images/apple-tv.png",
   "com.apple.TVWatchList": "/local/images/apple-tv.png",
   "Starz": "/local/images/starz.png",
@@ -759,28 +760,34 @@ class MkraftmanMediaControl extends HTMLElement {
     const pendingApp = pendingEntity && pendingEntity.state && pendingEntity.state.length > 0
       ? pendingEntity.state : null;
 
-    // Clear pending app once real content is playing
-    if (pendingApp && isPlaying && !ambiguousState) {
+    // Check whether the entity's app matches what the pending app expects.
+    // During app transitions the entity may still report the previous app.
+    const appMatchesPending = !pendingApp || (appName && appName === pendingApp);
+
+    // Clear pending app only once the REAL app has caught up to what we expect
+    if (pendingApp && isPlaying && !ambiguousState && appMatchesPending) {
       this._hass.callService("input_text", "set_value", {
         entity_id: this._config.pending_app_entity,
         value: "",
       });
     }
 
-    const showPending = pendingApp && !isTrulyActive;
-    el.name.textContent = isTrulyActive
-      ? (appName || friendlyName)
-      : (showPending ? pendingApp : friendlyName);
+    // Show pending app when the entity hasn't caught up yet (stale data from
+    // previous app) OR when the player isn't truly active yet
+    const showPending = pendingApp && (!isTrulyActive || !appMatchesPending);
+    el.name.textContent = showPending
+      ? pendingApp
+      : (isTrulyActive ? (appName || friendlyName) : friendlyName);
 
-    // media info — only show title when truly active
-    const hasTitle = isTrulyActive && !!a.media_title;
+    // media info — only show title when truly active AND not showing stale data
+    const hasTitle = isTrulyActive && !showPending && !!a.media_title;
     el.title.textContent = hasTitle ? a.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
-    // artwork background — suppress during phantom plays
-    const realPic = !isPhantomPlay
+    // artwork background — suppress during phantom plays and app transitions
+    const realPic = !isPhantomPlay && !showPending
       ? (a.entity_picture || a.entity_picture_local || null) : null;
-    const fallbackAppName = isTrulyActive ? a.app_name : (showPending ? pendingApp : null);
+    const fallbackAppName = showPending ? pendingApp : (isTrulyActive ? a.app_name : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     if (realPic && this._customBg) {
