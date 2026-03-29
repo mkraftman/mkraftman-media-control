@@ -81,6 +81,7 @@ class MkraftmanMediaControl extends HTMLElement {
     this._lastMediaTitle = null;
     this._customBg = null;
     this._customFg = null;
+    this._extractedForApp = null;
 
     this._progressTimer = null;
     this._dragging = false;
@@ -742,14 +743,6 @@ class MkraftmanMediaControl extends HTMLElement {
       || (isGoogleTV && hasProgress));
     const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
     const friendlyName = (a.friendly_name || this._config.entity).replace(/ Universal$/, "");
-    el.name.textContent = isTrulyActive
-      ? (appName || friendlyName)
-      : friendlyName;
-
-    // media info — only show title when truly active
-    const hasTitle = isTrulyActive && !!a.media_title;
-    el.title.textContent = hasTitle ? a.media_title : "\u00A0";
-    el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
     // play / pause icon — use toggle icon when state is ambiguous:
     // "on" = no Cast info at all; "playing" with no media info = Cast state unreliable
@@ -759,11 +752,37 @@ class MkraftmanMediaControl extends HTMLElement {
       : (isPlaying ? "mdi:pause" : "mdi:play");
     el.btnMap.pp.ic.setAttribute("icon", ppIcon);
 
+    // Pending app: set by launch scripts to show correct app immediately
+    // before the entity updates. Cleared when real content starts playing.
+    const pendingEntity = this._config.pending_app_entity
+      && this._hass.states[this._config.pending_app_entity];
+    const pendingApp = pendingEntity && pendingEntity.state && pendingEntity.state.length > 0
+      ? pendingEntity.state : null;
+
+    // Clear pending app once real content is playing
+    if (pendingApp && isPlaying && !ambiguousState) {
+      this._hass.callService("input_text", "set_value", {
+        entity_id: this._config.pending_app_entity,
+        value: "",
+      });
+    }
+
+    const showPending = pendingApp && !isTrulyActive;
+    el.name.textContent = isTrulyActive
+      ? (appName || friendlyName)
+      : (showPending ? pendingApp : friendlyName);
+
+    // media info — only show title when truly active
+    const hasTitle = isTrulyActive && !!a.media_title;
+    el.title.textContent = hasTitle ? a.media_title : "\u00A0";
+    el.title.style.visibility = hasTitle ? "visible" : "hidden";
+
     // artwork background — suppress during phantom plays
     const realPic = !isPhantomPlay
       ? (a.entity_picture || a.entity_picture_local || null) : null;
-    const fallbackPic = (isTrulyActive && a.app_name)
-      ? (APP_IMAGE_MAP[a.app_name] || null) : null;
+    const fallbackAppName = isTrulyActive ? a.app_name : (showPending ? pendingApp : null);
+    const fallbackPic = fallbackAppName
+      ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     if (realPic && this._customBg) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
       el.bgImage.style.opacity = "1";
