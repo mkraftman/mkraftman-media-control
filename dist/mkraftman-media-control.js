@@ -38,6 +38,7 @@ const APP_IMAGE_MAP = {
   "Spotify": "/local/images/spotify.png",
   "Plex": "/local/images/plex.png",
   "BBC iPlayer": "/local/images/bbc-iplayer.png",
+  "bbc.iplayer.android": "/local/images/bbc-iplayer.png",
   "ITVX": "/local/images/itvx.png",
   "ITV Hub": "/local/images/itvx.png",
   "Channel 4": "/local/images/channel4.png",
@@ -787,11 +788,20 @@ class MkraftmanMediaControl extends HTMLElement {
     // artwork background — suppress during phantom plays and app transitions
     const realPic = !isPhantomPlay && !showPending
       ? (a.entity_picture || a.entity_picture_local || null) : null;
+    // image_entity: external image URL from an input_text helper (e.g. BBC iPlayer API)
+    const imageEntity = this._config.image_entity
+      && this._hass.states[this._config.image_entity];
+    const externalPic = imageEntity && imageEntity.state && imageEntity.state.length > 0
+      ? imageEntity.state : null;
     const fallbackAppName = showPending ? pendingApp : (isTrulyActive ? a.app_name : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     if (realPic && this._customBg) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
+      el.bgImage.style.opacity = "1";
+      this._updateBgSize();
+    } else if (externalPic && this._customBg) {
+      el.bgImage.style.backgroundImage = "url('" + externalPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
     } else if (fallbackPic) {
