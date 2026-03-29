@@ -213,6 +213,8 @@ class MkraftmanMediaControl extends HTMLElement {
       // Content changed while paused — stale data; clear, don't extract
       this._clearColors();
       this._lastMediaTitle = title;
+      this._isLiveStream = false;
+      this._prevMediaDuration = null;
     } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
       this._clearColors();
