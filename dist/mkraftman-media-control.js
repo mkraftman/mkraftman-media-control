@@ -196,9 +196,11 @@ class MkraftmanMediaControl extends HTMLElement {
     ) {
       this._lastPicture = pic;
       this._extractColors(pic);
+      // New content — reset live stream detection so progress bar works
+      this._isLiveStream = false;
+      this._prevMediaDuration = null;
     } else if (pic && pic !== this._lastPicture && entity.state === "paused") {
       // Pic changed while paused — stale data; clear, don't extract
-      this._lastPicture = pic;
       this._clearColors();
     } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
