@@ -78,6 +78,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
     this._prevAppName = undefined;
     this._lastPicture = null;
+    this._lastMediaTitle = null;
     this._customBg = null;
     this._customFg = null;
 
@@ -179,29 +180,39 @@ class MkraftmanMediaControl extends HTMLElement {
       this._prevMediaDuration = null;
     }
 
-    // New artwork -> extract colours only when playing/buffering.
-    // Paused never triggers extraction — prevents stale Apple TV data
-    // from re-extracting after a clear (disconnect, app change, etc.)
+    // Detect new content by change in picture OR media title
     const pic =
       entity.attributes.entity_picture ||
       entity.attributes.entity_picture_local ||
       null;
+    const title = entity.attributes.media_title || null;
     const dur = entity.attributes.media_duration;
     const phantom = entity.state === "playing" && dur > 0 && dur < 5;
+    const contentChanged =
+      (pic !== this._lastPicture) || (title !== this._lastMediaTitle);
+
     if (
-      pic &&
-      pic !== this._lastPicture &&
+      contentChanged &&
       (entity.state === "playing" || entity.state === "buffering") &&
       !phantom
     ) {
       this._lastPicture = pic;
-      this._extractColors(pic);
+      this._lastMediaTitle = title;
       // New content — reset live stream detection so progress bar works
       this._isLiveStream = false;
       this._prevMediaDuration = null;
-    } else if (pic && pic !== this._lastPicture && entity.state === "paused") {
-      // Pic changed while paused — stale data; clear, don't extract
+      if (pic) {
+        this._extractColors(pic);
+      } else {
+        this._clearColors();
+        // Restore tracking so we detect the next change
+        this._lastPicture = pic;
+        this._lastMediaTitle = title;
+      }
+    } else if (contentChanged && entity.state === "paused") {
+      // Content changed while paused — stale data; clear, don't extract
       this._clearColors();
+      this._lastMediaTitle = title;
     } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
       this._clearColors();
@@ -818,6 +829,7 @@ class MkraftmanMediaControl extends HTMLElement {
     this._customBg = null;
     this._customFg = null;
     this._lastPicture = null;
+    this._lastMediaTitle = null;
     const el = this._el;
     if (el.bgImage) {
       el.bgImage.style.opacity = "0";
