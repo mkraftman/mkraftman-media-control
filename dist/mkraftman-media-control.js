@@ -811,7 +811,7 @@ class MkraftmanMediaControl extends HTMLElement {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
-    } else if (externalPic && this._customBg) {
+    } else if (externalPic) {
       el.bgImage.style.backgroundImage = "url('" + externalPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
