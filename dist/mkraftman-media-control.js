@@ -68,6 +68,15 @@ const APP_IMAGE_MAP = {
   "UKTV Play": "/local/images/u.png"
 };
 
+// Map Android TV package names (and other IDs) to user-friendly display names
+const APP_DISPLAY_NAME = {
+  "TV": "Apple TV",
+  "com.apple.TVWatchList": "Apple TV",
+  "bbc.iplayer.android": "BBC iPlayer",
+  "com.google.android.youtube.tv": "YouTube",
+  "com.plexapp.android": "Plex",
+};
+
 class MkraftmanMediaControl extends HTMLElement {
   constructor() {
     super();
@@ -743,7 +752,9 @@ class MkraftmanMediaControl extends HTMLElement {
       || (hasRealPic && this._customBg)
       || (!hasRealPic && !!a.media_title)
       || (isGoogleTV && hasProgress));
-    const appName = a.app_name === "TV" ? "Apple TV" : a.app_name;
+    const appName = APP_DISPLAY_NAME[a.app_name] || a.app_name;
+    // Whether the current app is recognised in APP_IMAGE_MAP (including package names)
+    const knownApp = !!(a.app_name && APP_IMAGE_MAP[a.app_name]);
     const friendlyName = (a.friendly_name || this._config.entity).replace(/ Universal$/, "");
 
     // play / pause icon — use toggle icon when state is ambiguous:
@@ -778,7 +789,7 @@ class MkraftmanMediaControl extends HTMLElement {
     const showPending = pendingApp && (!isTrulyActive || !appMatchesPending);
     el.name.textContent = showPending
       ? pendingApp
-      : (isTrulyActive ? (appName || friendlyName) : friendlyName);
+      : ((isTrulyActive || knownApp) ? (appName || friendlyName) : friendlyName);
 
     // media info — only show title when truly active AND not showing stale data
     const hasTitle = isTrulyActive && !showPending && !!a.media_title;
@@ -793,7 +804,7 @@ class MkraftmanMediaControl extends HTMLElement {
       && this._hass.states[this._config.image_entity];
     const externalPic = imageEntity && imageEntity.state && imageEntity.state.length > 0
       ? imageEntity.state : null;
-    const fallbackAppName = showPending ? pendingApp : (isTrulyActive ? a.app_name : null);
+    const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || knownApp) ? a.app_name : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     if (realPic && this._customBg) {
