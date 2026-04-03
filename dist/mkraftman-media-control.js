@@ -65,7 +65,26 @@ const APP_IMAGE_MAP = {
   "Peacock": "/local/images/peacock.png",
   "U": "/local/images/u.png",
   "UKTV": "/local/images/u.png",
-  "UKTV Play": "/local/images/u.png"
+  "UKTV Play": "/local/images/u.png",
+  // Android TV package names
+  "com.channel4.ondemand": "/local/images/channel4.png",
+  "com.channel5.my5": "/local/images/my5.png",
+  "uk.co.channel5.my5": "/local/images/my5.png",
+  "com.google.android.youtube.tv": "/local/images/youtube.png",
+  "com.plexapp.android": "/local/images/plex.png",
+  "com.netflix.ninja": "/local/images/netflix.png",
+  "com.amazon.amazonvideo.livingroom": "/local/images/prime-video.png",
+  "com.disney.disneyplus": "/local/images/disney-plus.png",
+  "com.paramountplus": "/local/images/paramount-plus.png",
+  "com.discoveryplus.androidtv": "/local/images/discovery-plus.png",
+  "com.hbo.hbonow": "/local/images/hbo-max.png",
+  "com.wbd.stream": "/local/images/hbo-max.png",
+  "com.hulu.livingroomplus": "/local/images/hulu.png",
+  "com.peacocktv.peacockandroid": "/local/images/peacock.png",
+  "com.spotify.tv.android": "/local/images/spotify.png",
+  "com.dazn": "/local/images/dazn.png",
+  "com.itv.itvhub": "/local/images/itvx.png",
+  "com.stv.stvplayer": "/local/images/itvx.png"
 };
 
 // Map Android TV package names (and other IDs) to user-friendly display names
@@ -75,6 +94,22 @@ const APP_DISPLAY_NAME = {
   "bbc.iplayer.android": "BBC iPlayer",
   "com.google.android.youtube.tv": "YouTube",
   "com.plexapp.android": "Plex",
+  "com.channel4.ondemand": "Channel 4",
+  "com.channel5.my5": "My5",
+  "uk.co.channel5.my5": "My5",
+  "com.netflix.ninja": "Netflix",
+  "com.amazon.amazonvideo.livingroom": "Prime Video",
+  "com.disney.disneyplus": "Disney+",
+  "com.paramountplus": "Paramount+",
+  "com.discoveryplus.androidtv": "discovery+",
+  "com.hbo.hbonow": "HBO Max",
+  "com.wbd.stream": "HBO Max",
+  "com.hulu.livingroomplus": "Hulu",
+  "com.peacocktv.peacockandroid": "Peacock",
+  "com.spotify.tv.android": "Spotify",
+  "com.dazn": "DAZN",
+  "com.itv.itvhub": "ITVX",
+  "com.stv.stvplayer": "ITVX",
 };
 
 class MkraftmanMediaControl extends HTMLElement {
