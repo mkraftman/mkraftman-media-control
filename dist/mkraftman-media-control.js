@@ -776,8 +776,15 @@ class MkraftmanMediaControl extends HTMLElement {
     // During app transitions the entity may still report the previous app.
     const appMatchesPending = !pendingApp || (appName && appName === pendingApp);
 
-    // Clear pending app only once the REAL app has caught up to what we expect
-    if (pendingApp && isPlaying && !ambiguousState && appMatchesPending) {
+    // Clear pending app when:
+    // 1. The expected app is now playing with real content, OR
+    // 2. A completely different app has loaded (pending is stale)
+    if (pendingApp && appMatchesPending && isPlaying && !ambiguousState) {
+      this._hass.callService("input_text", "set_value", {
+        entity_id: this._config.pending_app_entity,
+        value: "",
+      });
+    } else if (pendingApp && !appMatchesPending && a.app_name) {
       this._hass.callService("input_text", "set_value", {
         entity_id: this._config.pending_app_entity,
         value: "",
