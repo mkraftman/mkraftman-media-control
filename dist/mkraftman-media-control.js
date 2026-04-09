@@ -129,10 +129,6 @@ class MkraftmanMediaControl extends HTMLElement {
     this._customFg = null;
     this._extractedForApp = null;
 
-    // FIX 4: Track whether we've seen genuinely playing content in the current
-    // session, so we can distinguish a real pause from stale leftover state.
-    this._hadRealContent = false;
-
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
@@ -188,7 +184,6 @@ class MkraftmanMediaControl extends HTMLElement {
     this._prevAppName = undefined;
     this._prevMediaDuration = null;
     this._isLiveStream = false;
-    this._hadRealContent = false;
     this._hass = null;
   }
 
@@ -220,7 +215,6 @@ class MkraftmanMediaControl extends HTMLElement {
     const app = entity.attributes.app_name || null;
     if (this._prevAppName !== undefined && app !== this._prevAppName) {
       this._clearColors();
-      this._hadRealContent = false;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     }
@@ -229,7 +223,6 @@ class MkraftmanMediaControl extends HTMLElement {
     // Idle / off / standby -> reset background and live stream flag
     if (["idle", "standby", "off", "unavailable"].includes(entity.state)) {
       this._clearColors();
-      this._hadRealContent = false;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     }
@@ -263,24 +256,15 @@ class MkraftmanMediaControl extends HTMLElement {
         this._lastPicture = pic;
         this._lastMediaTitle = title;
       }
-      // FIX 4: We've seen real content playing — mark it so paused state is trusted
-      if (title || pic) this._hadRealContent = true;
     } else if (contentChanged && entity.state === "paused") {
       // Content changed while paused — stale data; clear, don't extract
       this._clearColors();
-      this._hadRealContent = false;
       this._lastMediaTitle = title;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
       this._clearColors();
-      this._hadRealContent = false;
-    } else if (entity.state === "playing" && !phantom && (title || pic)) {
-      // FIX 4: Catch the case where we transitioned playing→paused→playing with
-      // the same content (no contentChanged), but _hadRealContent was lost (e.g.
-      // after a reconnect). Re-mark it so paused detection works correctly next time.
-      this._hadRealContent = true;
     }
 
     this._update();
@@ -792,24 +776,17 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // top row — entity name when idle, app name when playing
     const isActive = ["playing", "paused", "buffering"].includes(state) && !isPhantomPlay;
-
     // When paused, treat as active if:
     // - we have extracted colours from a prior playing state (genuine pause), OR
-    // - there's a title but no pic — but ONLY if we previously saw real content
-    //   (_hadRealContent) to avoid stale Apple TV attributes showing after returning home.
-    //   FIX 3: The old `(!hasRealPic && !!a.media_title)` check was too permissive;
-    //   Apple TV retains media_title/entity_picture after content ends/returning home.
-    //   We now require _hadRealContent to be set (proves we genuinely played this content)
-    //   before trusting a bare media_title in paused state.
+    // - there's a title but no pic (e.g. BBC iPlayer on Google TV — real content, no artwork), OR
     // - on Google TV only: valid progress info (duration + position) — Cast clears this
     //   reliably on home/app switch unlike Apple TV which keeps stale data
     const isGoogleTV = this._config.entity && this._config.entity.includes("google_tv");
     const hasProgress = a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null;
     const isTrulyActive = isActive && (isPlaying
       || (hasRealPic && this._customBg)
-      || (!hasRealPic && !!a.media_title && (isPlaying || this._hadRealContent))
+      || (!hasRealPic && !!a.media_title)
       || (isGoogleTV && hasProgress));
-
     const appName = APP_DISPLAY_NAME[a.app_name] || a.app_name;
     // Whether the current app is recognised in APP_IMAGE_MAP (including package names)
     const knownApp = !!(a.app_name && APP_IMAGE_MAP[a.app_name]);
