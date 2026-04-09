@@ -806,9 +806,14 @@ class MkraftmanMediaControl extends HTMLElement {
     const isGoogleTV = this._config.entity && this._config.entity.includes("google_tv");
     const hasProgress = a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null;
     const isTrulyActive = isActive && (isPlaying
-      || (hasRealPic && this._customBg)
+      // FIX: guard all paused-state branches with _hadRealContent to prevent
+      // stale Roku/Google TV attributes showing after content ends. Roku often
+      // stays paused with entity_picture + customBg intact; Google TV can retain
+      // progress data across Cast sessions. _hadRealContent is only set when we
+      // observe genuine playing state, so a real pause still passes through.
+      || (hasRealPic && this._customBg && this._hadRealContent)
       || (!hasRealPic && !!a.media_title && (isPlaying || this._hadRealContent))
-      || (isGoogleTV && hasProgress));
+      || (isGoogleTV && hasProgress && this._hadRealContent));
 
     const appName = APP_DISPLAY_NAME[a.app_name] || a.app_name;
     // Whether the current app is recognised in APP_IMAGE_MAP (including package names)
