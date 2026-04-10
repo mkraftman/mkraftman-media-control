@@ -204,12 +204,33 @@ class MkraftmanMediaControl extends HTMLElement {
     const entity = hass.states[this._config.entity];
     if (!entity) return;
 
-    // Skip if our entity hasn't changed
+    // Skip if our entity hasn't changed — but also check image_entity and
+    // pending_app_entity, since those are separate HA helpers that the card
+    // reads in _update(). If only one of those changed (e.g. an automation
+    // cleared input_text.roku_media_image), the media player last_updated
+    // won't have moved, so we'd bail out and the image would never refresh
+    // until something else triggered a media player update.
     const prevEntity = prev && prev.states[this._config.entity];
+    const imageEntityId = this._config.image_entity;
+    const prevImageState = prev && imageEntityId && prev.states[imageEntityId];
+    const currImageState = imageEntityId && hass.states[imageEntityId];
+    const imageEntityChanged = imageEntityId && (
+      !prevImageState ||
+      (prevImageState.state !== (currImageState && currImageState.state))
+    );
+    const pendingEntityId = this._config.pending_app_entity;
+    const prevPendingState = prev && pendingEntityId && prev.states[pendingEntityId];
+    const currPendingState = pendingEntityId && hass.states[pendingEntityId];
+    const pendingEntityChanged = pendingEntityId && (
+      !prevPendingState ||
+      (prevPendingState.state !== (currPendingState && currPendingState.state))
+    );
     if (
       prevEntity &&
       prevEntity.last_updated === entity.last_updated &&
-      prevEntity.state === entity.state
+      prevEntity.state === entity.state &&
+      !imageEntityChanged &&
+      !pendingEntityChanged
     ) {
       return;
     }
