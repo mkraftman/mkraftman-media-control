@@ -140,6 +140,15 @@ class MkraftmanMediaControl extends HTMLElement {
     // onload callback re-sets _customBg with stale colours.
     this._colorGeneration = 0;
 
+    // FIX 6: Navigation-based stale detection — subscribe to call_service
+    // events on the HA WebSocket to detect when remote navigation commands
+    // (home, menu, d-pad) are sent. After a short delay, if the entity is
+    // not genuinely playing, clear stale artwork/title. This is the only
+    // reliable way to handle pyatv retaining stale attributes after the
+    // user navigates away from content.
+    this._eventUnsub = null;
+    this._staleCheckTimer = null;
+
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
@@ -188,6 +197,15 @@ class MkraftmanMediaControl extends HTMLElement {
     if (this._resizeTimeout) {
       clearTimeout(this._resizeTimeout);
       this._resizeTimeout = null;
+    }
+    // FIX 6: Unsubscribe from call_service events and cancel pending stale check
+    if (this._eventUnsub) {
+      this._eventUnsub();
+      this._eventUnsub = null;
+    }
+    if (this._staleCheckTimer) {
+      clearTimeout(this._staleCheckTimer);
+      this._staleCheckTimer = null;
     }
     // Clear artwork cache so we start fresh on reconnect
     this._clearColors();
@@ -244,6 +262,10 @@ class MkraftmanMediaControl extends HTMLElement {
     }
 
     if (!this._built) this._build();
+
+    // FIX 6: Subscribe to remote command events (once) so we can detect
+    // navigation and clear stale data that pyatv never updates.
+    this._subscribeRemoteEvents();
 
     // Compute content attributes early — needed for both app-change and
     // content-change detection below.
@@ -1082,6 +1104,93 @@ class MkraftmanMediaControl extends HTMLElement {
     };
     img.onerror = () => {};
     img.src = url;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  FIX 6: Navigation-based stale data detection                       */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Subscribe (once) to HA call_service WebSocket events. When a
+   * remote.send_command targeting our remote_entity is detected with a
+   * navigation command, schedule a stale-data check.
+   */
+  _subscribeRemoteEvents() {
+    if (this._eventUnsub) return;          // already subscribed
+    const conn = this._hass && this._hass.connection;
+    if (!conn) return;
+
+    const remoteEntity = this._config.remote_entity ||
+      this._config.entity.replace("media_player.", "remote.");
+
+    // Default navigation commands — override via config nav_commands: [...]
+    const navCommands = this._config.nav_commands || [
+      "home", "menu", "top_menu", "back",       // Apple TV navigation
+      "up", "down", "left", "right", "select",  // D-pad (universal)
+      "Home", "Back",                            // Roku capitalised variants
+    ];
+    const navSet = new Set(navCommands);
+
+    conn.subscribeEvents((event) => {
+      const d = event.data;
+      if (d.domain !== "remote" || d.service !== "send_command") return;
+
+      // Entity ID may be in service_data or target (HA 2024.8+ format)
+      const sdEnt = d.service_data && d.service_data.entity_id;
+      const tgtEnt = d.target && d.target.entity_id;
+      const candidates = [].concat(sdEnt || [], tgtEnt || []);
+      if (!candidates.includes(remoteEntity)) return;
+
+      // Check if any sent command is a navigation command
+      const cmd = d.service_data && d.service_data.command;
+      const cmds = Array.isArray(cmd) ? cmd : cmd ? [cmd] : [];
+      if (!cmds.some(c => navSet.has(c))) return;
+
+      this._scheduleStaleCheck();
+    }, "call_service").then(unsub => {
+      this._eventUnsub = unsub;
+    });
+  }
+
+  /**
+   * Schedule a delayed stale-data check. If the entity is not genuinely
+   * playing when the timer fires, clear the card's internal state so it
+   * falls back to the idle / app-logo display. The delay allows time for
+   * pyatv to report new playing state if the navigation actually started
+   * content (e.g. pressing select on a title).
+   *
+   * Each new navigation command resets the timer so rapid d-pad presses
+   * don't cause flickering.
+   */
+  _scheduleStaleCheck() {
+    if (!this._hadRealContent) return;     // nothing to clear
+    if (this._staleCheckTimer) clearTimeout(this._staleCheckTimer);
+
+    const delay = this._config.stale_check_delay || 2000;
+    this._staleCheckTimer = setTimeout(() => {
+      this._staleCheckTimer = null;
+      if (!this._hass || !this._config) return;
+      const entity = this._hass.states[this._config.entity];
+      if (!entity) return;
+
+      // If content is genuinely playing right now, leave it alone —
+      // the navigation was probably within the player (e.g. subtitles menu)
+      if (entity.state === "playing") return;
+
+      // Clear stale state using the same pattern as the app-change handler:
+      // snapshot current attributes so contentChanged doesn't immediately
+      // re-trigger and undo the clear.
+      const pic = entity.attributes.entity_picture ||
+        entity.attributes.entity_picture_local || null;
+      const title = entity.attributes.media_title || null;
+      this._clearColors();
+      this._hadRealContent = false;
+      this._isLiveStream = false;
+      this._prevMediaDuration = null;
+      this._lastPicture = pic;
+      this._lastMediaTitle = title;
+      this._update();
+    }, delay);
   }
 
   /* ------------------------------------------------------------------ */
