@@ -237,6 +237,16 @@ class MkraftmanMediaControl extends HTMLElement {
 
     if (!this._built) this._build();
 
+    // Compute content attributes early — needed for both app-change and
+    // content-change detection below.
+    const pic =
+      entity.attributes.entity_picture ||
+      entity.attributes.entity_picture_local ||
+      null;
+    const title = entity.attributes.media_title || null;
+    const dur = entity.attributes.media_duration;
+    const phantom = entity.state === "playing" && dur > 0 && dur < 5;
+
     // Detect app change -> reset background and live stream flag
     const app = entity.attributes.app_name || null;
     if (this._prevAppName !== undefined && app !== this._prevAppName) {
@@ -244,6 +254,14 @@ class MkraftmanMediaControl extends HTMLElement {
       this._hadRealContent = false;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
+      // Snapshot current entity_picture/media_title as "already seen" so that
+      // contentChanged doesn't immediately re-fire on the stale entity data.
+      // Apple TV often keeps the previous app's media attributes for a brief
+      // period after app_name changes (pyatv is slow to clear them). Without
+      // this, we'd re-extract colors and re-set _hadRealContent from stale data,
+      // completely undoing the clear we just did.
+      this._lastPicture = pic;
+      this._lastMediaTitle = title;
     }
     this._prevAppName = app;
 
@@ -256,13 +274,7 @@ class MkraftmanMediaControl extends HTMLElement {
     }
 
     // Detect new content by change in picture OR media title
-    const pic =
-      entity.attributes.entity_picture ||
-      entity.attributes.entity_picture_local ||
-      null;
-    const title = entity.attributes.media_title || null;
-    const dur = entity.attributes.media_duration;
-    const phantom = entity.state === "playing" && dur > 0 && dur < 5;
+    // Note: pic, title, dur, phantom computed above
     const contentChanged =
       (pic !== this._lastPicture) || (title !== this._lastMediaTitle);
 
