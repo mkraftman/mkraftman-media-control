@@ -10,11 +10,19 @@
  *  - Draggable seek thumb on progress bar
  *  - Right-aligned artwork with colour fade to left
  *  - Background resets to default on app change or return to home screen
+ *  - Automatic artwork fetching from TVmaze for content without entity_picture
+ *  - Navigation-based stale data detection via WebSocket event subscription
  *
  * Config options:
- *   entity:        (required) media_player entity
- *   remote_entity: (optional) remote entity for send_command actions
- *   buttons:       (optional) array of button definitions:
+ *   entity:             (required) media_player entity
+ *   remote_entity:      (optional) remote entity for send_command actions
+ *   image_entity:       (optional) input_text entity providing an external image URL override
+ *   pending_app_entity: (optional) input_text entity for pending app display during transitions
+ *   nav_commands:       (optional) override default navigation commands for stale detection
+ *   stale_check_delay:  (optional) ms before stale check fires (default: 2000)
+ *   seekable:           (optional) enable/disable seek bar (default: true)
+ *   wake_command:       (optional) command to wake from idle (default: "select")
+ *   buttons:            (optional) array of button definitions:
  *     - icon: mdi icon name
  *       command: remote command string (uses remote_entity)
  *     - primary: true  (play/pause button, auto-toggles icon)
@@ -149,6 +157,14 @@ class MkraftmanMediaControl extends HTMLElement {
     this._eventUnsub = null;
     this._staleCheckTimer = null;
 
+    // TVmaze artwork auto-fetch: when content plays without entity_picture,
+    // the card searches TVmaze by media_title and displays the result.
+    // Eliminates the need for external automations, shell_commands, and
+    // input_text helpers to provide fallback artwork.
+    this._tvmazeCache = {};       // title → image URL (persists within session)
+    this._fetchedArtwork = null;  // active TVmaze URL for current content
+    this._artworkGeneration = 0;  // invalidates stale async fetch results
+
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
@@ -215,6 +231,8 @@ class MkraftmanMediaControl extends HTMLElement {
     this._isLiveStream = false;
     this._hadRealContent = false;
     this._colorGeneration = 0;
+    this._fetchedArtwork = null;
+    this._artworkGeneration = 0;
     this._hass = null;
   }
 
@@ -344,6 +362,16 @@ class MkraftmanMediaControl extends HTMLElement {
       // the same content (no contentChanged), but _hadRealContent was lost (e.g.
       // after a reconnect). Re-mark it so paused detection works correctly next time.
       this._hadRealContent = true;
+    }
+
+    // Auto-fetch artwork from TVmaze when playing content has a title but
+    // no entity_picture. Async: on success, sets _fetchedArtwork and calls
+    // _update() again to display the result. Cached per title within session.
+    if (
+      (entity.state === "playing" || entity.state === "buffering") &&
+      !phantom && title && !pic
+    ) {
+      this._fetchArtwork(title);
     }
 
     this._update();
@@ -950,6 +978,13 @@ class MkraftmanMediaControl extends HTMLElement {
       el.bgImage.style.backgroundImage = "url('" + externalPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
+    } else if (this._fetchedArtwork && isTrulyActive) {
+      // TVmaze artwork — auto-fetched when no entity_picture available.
+      // If _extractColors succeeded on this URL, bgColor and gradient
+      // already reflect the artwork colours via _applyColors().
+      el.bgImage.style.backgroundImage = "url('" + this._fetchedArtwork + "')";
+      el.bgImage.style.opacity = "1";
+      this._updateBgSize();
     } else if (fallbackPic) {
       el.bgImage.style.backgroundImage = "url('" + fallbackPic + "')";
       el.bgImage.style.opacity = "1";
@@ -1032,9 +1067,11 @@ class MkraftmanMediaControl extends HTMLElement {
   }
 
   _clearColors() {
-    // FIX 5: Increment generation to invalidate any in-flight _extractColors
-    // callbacks that haven't resolved yet.
+    // Increment generation counters to invalidate any in-flight async
+    // callbacks: _extractColors image loads and _fetchArtwork API calls.
     this._colorGeneration++;
+    this._fetchedArtwork = null;
+    this._artworkGeneration++;
     this._customBg = null;
     this._customFg = null;
     this._lastPicture = null;
@@ -1104,6 +1141,78 @@ class MkraftmanMediaControl extends HTMLElement {
     };
     img.onerror = () => {};
     img.src = url;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  TVmaze artwork auto-fetch                                          */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Fetch show artwork from TVmaze by title. Uses an in-memory cache
+   * (keyed by title) so each show is looked up at most once per session.
+   *
+   * On success: sets _fetchedArtwork, attempts _extractColors for colour-
+   * matched background, and calls _update() to display the artwork.
+   *
+   * On failure (no match, network error, CORS block): silently falls
+   * through to the app-logo fallback in _update().
+   *
+   * The _artworkGeneration counter (incremented by _clearColors) ensures
+   * that results arriving after a content/app change are discarded.
+   */
+  _fetchArtwork(title) {
+    if (!title) return;
+
+    // Cache hit — use immediately
+    if (this._tvmazeCache[title]) {
+      if (this._fetchedArtwork !== this._tvmazeCache[title]) {
+        this._fetchedArtwork = this._tvmazeCache[title];
+        this._extractColors(this._fetchedArtwork);
+      }
+      return;
+    }
+
+    const gen = this._artworkGeneration;
+
+    fetch(
+      "https://api.tvmaze.com/singlesearch/shows?q=" +
+        encodeURIComponent(title) + "&embed=images"
+    )
+      .then(resp => {
+        if (!resp.ok || gen !== this._artworkGeneration) return null;
+        return resp.json();
+      })
+      .then(data => {
+        if (!data || gen !== this._artworkGeneration) return;
+
+        let url = null;
+
+        // Prefer background (landscape) images for the card's right-aligned artwork
+        const images = (data._embedded && data._embedded.images) || [];
+        for (let i = 0; i < images.length; i++) {
+          if (images[i].type === "background") {
+            const res = images[i].resolutions || {};
+            url = (res.original && res.original.url) || (res.medium && res.medium.url);
+            if (url) break;
+          }
+        }
+
+        // Fall back to the show's main poster image
+        if (!url && data.image) {
+          url = data.image.original || data.image.medium;
+        }
+
+        if (!url || gen !== this._artworkGeneration) return;
+
+        this._tvmazeCache[title] = url;
+        this._fetchedArtwork = url;
+        this._extractColors(url);
+        this._update();
+      })
+      .catch(() => {
+        // Network error, CORS block, JSON parse failure — silently ignore.
+        // The card falls through to the app-logo fallback.
+      });
   }
 
   /* ------------------------------------------------------------------ */
