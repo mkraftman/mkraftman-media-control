@@ -165,6 +165,11 @@ class MkraftmanMediaControl extends HTMLElement {
     this._fetchedArtwork = null;  // active TVmaze URL for current content
     this._artworkGeneration = 0;  // invalidates stale async fetch results
 
+    // When true, suppress the knownApp bypass so the card falls back to
+    // device name/image instead of app name/image. Set by stale navigation
+    // detection and disconnectedCallback; cleared on genuine play or app change.
+    this._navStale = false;
+
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
@@ -214,6 +219,11 @@ class MkraftmanMediaControl extends HTMLElement {
       clearTimeout(this._resizeTimeout);
       this._resizeTimeout = null;
     }
+    // When the card disconnects (Lovelace navigation away), mark as stale
+    // so that reconnection doesn't show stale app name/logo from pyatv's
+    // retained attributes. Cleared when genuine content plays.
+    this._navStale = true;
+
     // FIX 6: Unsubscribe from call_service events and cancel pending stale check
     if (this._eventUnsub) {
       this._eventUnsub();
@@ -300,6 +310,7 @@ class MkraftmanMediaControl extends HTMLElement {
     if (this._prevAppName !== undefined && app !== this._prevAppName) {
       this._clearColors();
       this._hadRealContent = false;
+      this._navStale = false;   // genuine app change — trust the new app_name
       this._isLiveStream = false;
       this._prevMediaDuration = null;
       // Snapshot current entity_picture/media_title as "already seen" so that
@@ -345,7 +356,10 @@ class MkraftmanMediaControl extends HTMLElement {
         this._lastMediaTitle = title;
       }
       // FIX 4: We've seen real content playing — mark it so paused state is trusted
-      if (title || pic) this._hadRealContent = true;
+      if (title || pic) {
+        this._hadRealContent = true;
+        this._navStale = false;
+      }
     } else if (contentChanged && entity.state === "paused") {
       // Content changed while paused — stale data; clear, don't extract
       this._clearColors();
@@ -362,6 +376,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // the same content (no contentChanged), but _hadRealContent was lost (e.g.
       // after a reconnect). Re-mark it so paused detection works correctly next time.
       this._hadRealContent = true;
+      this._navStale = false;
     }
 
     // Auto-fetch artwork from TVmaze when playing content has a title but
@@ -948,9 +963,10 @@ class MkraftmanMediaControl extends HTMLElement {
     // Show pending app when the entity hasn't caught up yet (stale data from
     // previous app) OR when the player isn't truly active yet
     const showPending = pendingApp && (!isTrulyActive || !appMatchesPending);
+    const trustApp = knownApp && !this._navStale;
     el.name.textContent = showPending
       ? pendingApp
-      : ((isTrulyActive || knownApp) ? (appName || friendlyName) : friendlyName);
+      : ((isTrulyActive || trustApp) ? (appName || friendlyName) : friendlyName);
 
     // media info — only show title when truly active AND not showing stale data
     const hasTitle = isTrulyActive && !showPending && !!a.media_title;
@@ -965,7 +981,7 @@ class MkraftmanMediaControl extends HTMLElement {
       && this._hass.states[this._config.image_entity];
     const externalPic = imageEntity && imageEntity.state && imageEntity.state.length > 0
       ? imageEntity.state : null;
-    const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || knownApp) ? a.app_name : null);
+    const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || trustApp) ? a.app_name : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     // FIX 5: Guard with _hadRealContent so a late-arriving _extractColors
@@ -1291,6 +1307,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // contentChanged fires and _extractColors re-runs.
       this._clearColors();
       this._hadRealContent = false;
+      this._navStale = true;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
       // Deliberately NOT snapshotting _lastPicture/_lastMediaTitle here
