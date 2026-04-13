@@ -1250,8 +1250,8 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Default navigation commands — override via config nav_commands: [...]
     const navCommands = this._config.nav_commands || [
-      "home", "menu", "top_menu", "back",        // Apple TV / universal
-      "Home", "Back",                             // Roku capitalised variants
+      "home", "top_menu",                         // Apple TV / universal
+      "Home",                                     // Roku capitalised variant
     ];
     const navSet = new Set(navCommands);
 
