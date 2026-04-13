@@ -1125,9 +1125,8 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Default navigation commands — override via config nav_commands: [...]
     const navCommands = this._config.nav_commands || [
-      "home", "menu", "top_menu", "back",       // Apple TV navigation
-      "up", "down", "left", "right", "select",  // D-pad (universal)
-      "Home", "Back",                            // Roku capitalised variants
+      "home", "menu", "top_menu", "back",        // Apple TV / universal
+      "Home", "Back",                             // Roku capitalised variants
     ];
     const navSet = new Set(navCommands);
 
@@ -1177,18 +1176,18 @@ class MkraftmanMediaControl extends HTMLElement {
       // the navigation was probably within the player (e.g. subtitles menu)
       if (entity.state === "playing") return;
 
-      // Clear stale state using the same pattern as the app-change handler:
-      // snapshot current attributes so contentChanged doesn't immediately
-      // re-trigger and undo the clear.
-      const pic = entity.attributes.entity_picture ||
-        entity.attributes.entity_picture_local || null;
-      const title = entity.attributes.media_title || null;
+      // Clear stale state. Unlike the app-change handler, we do NOT snapshot
+      // the current pic/title — we want _lastPicture to stay null so that
+      // when content genuinely resumes (even with the same entity_picture),
+      // contentChanged fires and _extractColors re-runs.
       this._clearColors();
       this._hadRealContent = false;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
-      this._lastPicture = pic;
-      this._lastMediaTitle = title;
+      // Deliberately NOT snapshotting _lastPicture/_lastMediaTitle here
+      // (unlike the app-change handler). _clearColors() leaves them null,
+      // so when genuine content resumes — even with the same entity_picture —
+      // contentChanged evaluates to true and _extractColors fires again.
       this._update();
     }, delay);
   }
