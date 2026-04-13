@@ -133,6 +133,13 @@ class MkraftmanMediaControl extends HTMLElement {
     // session, so we can distinguish a real pause from stale leftover state.
     this._hadRealContent = false;
 
+    // FIX 5: Generation counter — incremented by _clearColors() so that async
+    // _extractColors() callbacks arriving after a clear are discarded. This
+    // prevents the race where: play content → _extractColors starts loading →
+    // navigate away → _clearColors resets state → image finishes loading →
+    // onload callback re-sets _customBg with stale colours.
+    this._colorGeneration = 0;
+
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
@@ -189,6 +196,7 @@ class MkraftmanMediaControl extends HTMLElement {
     this._prevMediaDuration = null;
     this._isLiveStream = false;
     this._hadRealContent = false;
+    this._colorGeneration = 0;
     this._hass = null;
   }
 
@@ -910,7 +918,9 @@ class MkraftmanMediaControl extends HTMLElement {
     const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || knownApp) ? a.app_name : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
-    if (realPic && this._customBg) {
+    // FIX 5: Guard with _hadRealContent so a late-arriving _extractColors
+    // callback can't re-show stale artwork after state was cleared.
+    if (realPic && this._customBg && this._hadRealContent) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
@@ -1000,6 +1010,9 @@ class MkraftmanMediaControl extends HTMLElement {
   }
 
   _clearColors() {
+    // FIX 5: Increment generation to invalidate any in-flight _extractColors
+    // callbacks that haven't resolved yet.
+    this._colorGeneration++;
     this._customBg = null;
     this._customFg = null;
     this._lastPicture = null;
@@ -1017,9 +1030,15 @@ class MkraftmanMediaControl extends HTMLElement {
   }
 
   _extractColors(url) {
+    // FIX 5: Capture generation at call time. If _clearColors() fires before
+    // the image loads, the generation will have advanced and the onload
+    // callback will bail out instead of re-applying stale colours.
+    const gen = this._colorGeneration;
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
+      // Stale extraction — a clear happened since we started loading
+      if (gen !== this._colorGeneration) return;
       try {
         const c = document.createElement("canvas");
         const ctx = c.getContext("2d");
