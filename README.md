@@ -112,6 +112,17 @@ The card includes built-in logos for: Netflix, Prime Video, YouTube, Disney+, Ap
 
 ## Changelog
 
+### v1.9.1
+
+**Preserve _confirmedApp through idle state**
+
+When exiting content on Apple TV, pyatv often transitions through `idle` before settling into `paused` with a stale `app_name`. The idle handler was clearing `_confirmedApp`, removing the protection before the stale `app_name` change arrived.
+
+- Only clear `_confirmedApp` on `standby`/`off`/`unavailable` (device actually powered down), not on `idle` (device still on, likely still in the app)
+- Remove `idle` from `isGenuineAppChange` trusted states — an `app_name` change during idle with `_confirmedApp` set is not trustworthy
+
+Recovery paths when `_confirmedApp` persists: Home command (stale check clears it), dashboard navigation (disconnect sets `_navStale`), new content plays (updates it), device powers off (standby/off clears it).
+
 ### v1.9.0
 
 **Work around pyatv stale app_name during in-app navigation**
