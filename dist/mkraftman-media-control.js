@@ -322,7 +322,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // _confirmedApp, pyatv often reports stale/incorrect app_name values
       // during in-app menu navigation — suppress the clear in that case.
       const isGenuineAppChange = !this._confirmedApp
-        || ["playing", "buffering", "idle", "standby", "off", "unavailable"].includes(entity.state);
+        || ["playing", "buffering", "standby", "off", "unavailable"].includes(entity.state);
       if (isGenuineAppChange) {
         this._clearColors();
         this._hadRealContent = false;
@@ -347,10 +347,16 @@ class MkraftmanMediaControl extends HTMLElement {
     if (["idle", "standby", "off", "unavailable"].includes(entity.state)) {
       this._clearColors();
       this._hadRealContent = false;
-      this._confirmedApp = null;
-      // Don't trust entity's app_name while idle — pyatv may report stale
-      // values. Fall back to device name/image until genuine content plays.
-      this._navStale = true;
+      // Preserve _confirmedApp through idle — the device is still on and may
+      // still be in the app. pyatv reports idle during in-app menu navigation.
+      // _confirmedApp overrides stale app_name in _update() so the correct
+      // app name/logo shows while browsing app menus after exiting content.
+      // Only clear on standby/off/unavailable (device actually powered down).
+      // Home screen transition is handled by _scheduleStaleCheck (detects
+      // Home command via WebSocket) and disconnectedCallback (dashboard nav).
+      if (["standby", "off", "unavailable"].includes(entity.state)) {
+        this._confirmedApp = null;
+      }
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     }
