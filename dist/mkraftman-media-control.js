@@ -320,7 +320,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // _confirmedApp, pyatv often reports stale/incorrect app_name values
       // during in-app menu navigation — suppress the clear in that case.
       const isGenuineAppChange = !this._confirmedApp
-        || ["playing", "buffering", "idle", "standby", "off", "unavailable"].includes(entity.state);
+        || ["playing", "buffering", "standby", "off", "unavailable"].includes(entity.state);
       if (isGenuineAppChange) {
         this._clearColors();
         this._hadRealContent = false;
@@ -345,7 +345,14 @@ class MkraftmanMediaControl extends HTMLElement {
     if (["idle", "standby", "off", "unavailable"].includes(entity.state)) {
       this._clearColors();
       this._hadRealContent = false;
-      this._confirmedApp = null;
+      // Only clear _confirmedApp when the device is actually powered down.
+      // During "idle", the device is still on and may still be in the app —
+      // pyatv reports idle during in-app menu navigation and between content.
+      // Clearing _confirmedApp on idle would lose the protection against
+      // stale app_name values that pyatv reports in these transitions.
+      if (["standby", "off", "unavailable"].includes(entity.state)) {
+        this._confirmedApp = null;
+      }
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     }
