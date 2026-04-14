@@ -170,6 +170,12 @@ class MkraftmanMediaControl extends HTMLElement {
     // detection and disconnectedCallback; cleared on genuine play or app change.
     this._navStale = false;
 
+    // Last app_name confirmed by genuine playback. Used to override the
+    // entity's app_name when the entity isn't playing, because pyatv can
+    // report stale/incorrect app_name values during app menu navigation
+    // (e.g. reporting "HBO Max" when still in ITVX).
+    this._confirmedApp = null;
+
     this._progressTimer = null;
     this._dragging = false;
     this._cardHeight = 0;
@@ -240,6 +246,7 @@ class MkraftmanMediaControl extends HTMLElement {
     this._prevMediaDuration = null;
     this._isLiveStream = false;
     this._hadRealContent = false;
+    this._confirmedApp = null;
     this._colorGeneration = 0;
     this._fetchedArtwork = null;
     this._artworkGeneration = 0;
@@ -308,19 +315,29 @@ class MkraftmanMediaControl extends HTMLElement {
     // Detect app change -> reset background and live stream flag
     const app = entity.attributes.app_name || null;
     if (this._prevAppName !== undefined && app !== this._prevAppName) {
-      this._clearColors();
-      this._hadRealContent = false;
-      this._navStale = false;   // genuine app change — trust the new app_name
-      this._isLiveStream = false;
-      this._prevMediaDuration = null;
-      // Snapshot current entity_picture/media_title as "already seen" so that
-      // contentChanged doesn't immediately re-fire on the stale entity data.
-      // Apple TV often keeps the previous app's media attributes for a brief
-      // period after app_name changes (pyatv is slow to clear them). Without
-      // this, we'd re-extract colors and re-set _hadRealContent from stale data,
-      // completely undoing the clear we just did.
-      this._lastPicture = pic;
-      this._lastMediaTitle = title;
+      // Only treat as genuine app change if the entity is actually playing
+      // (new app started) or idle/off (left all apps). When paused with a
+      // _confirmedApp, pyatv often reports stale/incorrect app_name values
+      // during in-app menu navigation — suppress the clear in that case.
+      const isGenuineAppChange = !this._confirmedApp
+        || ["playing", "buffering", "idle", "standby", "off", "unavailable"].includes(entity.state);
+      if (isGenuineAppChange) {
+        this._clearColors();
+        this._hadRealContent = false;
+        this._navStale = false;
+        this._isLiveStream = false;
+        this._prevMediaDuration = null;
+        // Snapshot current entity_picture/media_title as "already seen" so that
+        // contentChanged doesn't immediately re-fire on the stale entity data.
+        // Apple TV often keeps the previous app's media attributes for a brief
+        // period after app_name changes (pyatv is slow to clear them). Without
+        // this, we'd re-extract colors and re-set _hadRealContent from stale data,
+        // completely undoing the clear we just did.
+        this._lastPicture = pic;
+        this._lastMediaTitle = title;
+      }
+      // else: suppressed — pyatv reported stale app_name while paused.
+      // Don't clear; _confirmedApp will override in _update().
     }
     this._prevAppName = app;
 
@@ -328,6 +345,7 @@ class MkraftmanMediaControl extends HTMLElement {
     if (["idle", "standby", "off", "unavailable"].includes(entity.state)) {
       this._clearColors();
       this._hadRealContent = false;
+      this._confirmedApp = null;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     }
@@ -359,6 +377,7 @@ class MkraftmanMediaControl extends HTMLElement {
       if (title || pic) {
         this._hadRealContent = true;
         this._navStale = false;
+        this._confirmedApp = app;
       }
     } else if (contentChanged && entity.state === "paused") {
       // Content changed while paused — stale data; clear, don't extract
@@ -377,6 +396,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // after a reconnect). Re-mark it so paused detection works correctly next time.
       this._hadRealContent = true;
       this._navStale = false;
+      if (!this._confirmedApp) this._confirmedApp = app;
     }
 
     // Auto-fetch artwork from TVmaze when playing content has a title but
@@ -921,9 +941,12 @@ class MkraftmanMediaControl extends HTMLElement {
       || (!hasRealPic && !!a.media_title && (isPlaying || this._hadRealContent))
       || (isGoogleTV && hasProgress && this._hadRealContent));
 
-    const appName = APP_DISPLAY_NAME[a.app_name] || a.app_name;
+    // Use _confirmedApp when the entity isn't playing and we have one —
+    // pyatv can report stale/wrong app_name during in-app menu navigation.
+    const rawApp = (!isPlaying && this._confirmedApp) ? this._confirmedApp : a.app_name;
+    const appName = APP_DISPLAY_NAME[rawApp] || rawApp;
     // Whether the current app is recognised in APP_IMAGE_MAP (including package names)
-    const knownApp = !!(a.app_name && APP_IMAGE_MAP[a.app_name]);
+    const knownApp = !!(rawApp && APP_IMAGE_MAP[rawApp]);
     const friendlyName = (a.friendly_name || this._config.entity).replace(/ Universal$/, "");
 
     // play / pause icon — use toggle icon when state is ambiguous:
@@ -953,7 +976,10 @@ class MkraftmanMediaControl extends HTMLElement {
         entity_id: this._config.pending_app_entity,
         value: "",
       });
-    } else if (pendingApp && !appMatchesPending && a.app_name) {
+    } else if (pendingApp && !appMatchesPending && isPlaying) {
+      // Only clear pending on app mismatch when genuinely playing.
+      // When paused/idle, pyatv may report stale app_name that doesn't
+      // match the pending app — don't clear pending in that case.
       this._hass.callService("input_text", "set_value", {
         entity_id: this._config.pending_app_entity,
         value: "",
@@ -981,7 +1007,7 @@ class MkraftmanMediaControl extends HTMLElement {
       && this._hass.states[this._config.image_entity];
     const externalPic = imageEntity && imageEntity.state && imageEntity.state.length > 0
       ? imageEntity.state : null;
-    const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || trustApp) ? a.app_name : null);
+    const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || trustApp) ? rawApp : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     // FIX 5: Guard with _hadRealContent so a late-arriving _extractColors
@@ -1308,6 +1334,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // contentChanged fires and _extractColors re-runs.
       this._clearColors();
       this._hadRealContent = false;
+      this._confirmedApp = null;
       this._navStale = true;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
