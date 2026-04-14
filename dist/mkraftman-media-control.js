@@ -166,9 +166,11 @@ class MkraftmanMediaControl extends HTMLElement {
     this._artworkGeneration = 0;  // invalidates stale async fetch results
 
     // When true, suppress the knownApp bypass so the card falls back to
-    // device name/image instead of app name/image. Set by stale navigation
-    // detection and disconnectedCallback; cleared on genuine play or app change.
-    this._navStale = false;
+    // device name/image instead of app name/image. Starts true because on
+    // initial load, entity data may be stale and cannot be trusted until
+    // genuine playback is observed. Also set by idle transitions, stale
+    // navigation detection, and disconnectedCallback.
+    this._navStale = true;
 
     // Last app_name confirmed by genuine playback. Used to override the
     // entity's app_name when the entity isn't playing, because pyatv can
@@ -320,7 +322,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // _confirmedApp, pyatv often reports stale/incorrect app_name values
       // during in-app menu navigation — suppress the clear in that case.
       const isGenuineAppChange = !this._confirmedApp
-        || ["playing", "buffering", "standby", "off", "unavailable"].includes(entity.state);
+        || ["playing", "buffering", "idle", "standby", "off", "unavailable"].includes(entity.state);
       if (isGenuineAppChange) {
         this._clearColors();
         this._hadRealContent = false;
@@ -345,14 +347,10 @@ class MkraftmanMediaControl extends HTMLElement {
     if (["idle", "standby", "off", "unavailable"].includes(entity.state)) {
       this._clearColors();
       this._hadRealContent = false;
-      // Only clear _confirmedApp when the device is actually powered down.
-      // During "idle", the device is still on and may still be in the app —
-      // pyatv reports idle during in-app menu navigation and between content.
-      // Clearing _confirmedApp on idle would lose the protection against
-      // stale app_name values that pyatv reports in these transitions.
-      if (["standby", "off", "unavailable"].includes(entity.state)) {
-        this._confirmedApp = null;
-      }
+      this._confirmedApp = null;
+      // Don't trust entity's app_name while idle — pyatv may report stale
+      // values. Fall back to device name/image until genuine content plays.
+      this._navStale = true;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     }
