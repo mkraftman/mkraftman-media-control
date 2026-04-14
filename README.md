@@ -112,6 +112,24 @@ The card includes built-in logos for: Netflix, Prime Video, YouTube, Disney+, Ap
 
 ## Changelog
 
+### v1.9.0
+
+**Work around pyatv stale app_name during in-app navigation**
+
+pyatv reports incorrect `app_name` values when the Apple TV entity is not actively playing content. For example, while navigating ITVX's menus after exiting playback, pyatv may report `app_name` as "HBO Max". This caused two bugs:
+
+- **(a) Exiting media to app menu:** The card detected an `app_name` change and treated it as a genuine app switch — clearing ITVX branding and showing HBO Max.
+- **(b) Returning from the streaming dashboard:** The pending app was set to "ITVX" by the launch script, but the entity reported "HBO Max". The mismatch cleared the pending app, showing HBO Max instead.
+
+New field: `_confirmedApp` — stores the `app_name` from the last genuine playback session. When the entity isn't playing, the card trusts `_confirmedApp` over the entity's potentially stale `app_name`.
+
+**How it works:**
+- Set to `app_name` when genuine content is detected playing
+- Used in place of `app_name` for display, logo lookup, and pending app matching when the entity isn't playing
+- App-change detection suppressed when entity is paused and `_confirmedApp` is set (stale pyatv data)
+- Pending app clearing on mismatch now requires the entity to be genuinely playing
+- Cleared on idle/off, stale navigation detection, and disconnect
+
 ### v1.8.3
 
 **Case-insensitive nav command matching for Google TV**
