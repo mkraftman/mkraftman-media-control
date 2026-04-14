@@ -1250,10 +1250,11 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Default navigation commands — override via config nav_commands: [...]
     const navCommands = this._config.nav_commands || [
-      "home", "top_menu",                         // Apple TV / universal
-      "Home",                                     // Roku capitalised variant
+      "home", "top_menu",
     ];
-    const navSet = new Set(navCommands);
+    // Case-insensitive matching — Apple TV uses "home", Roku uses "home",
+    // Google TV (Android TV Remote) uses "HOME".
+    const navSet = new Set(navCommands.map(c => c.toLowerCase()));
 
     conn.subscribeEvents((event) => {
       const d = event.data;
@@ -1268,7 +1269,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // Check if any sent command is a navigation command
       const cmd = d.service_data && d.service_data.command;
       const cmds = Array.isArray(cmd) ? cmd : cmd ? [cmd] : [];
-      if (!cmds.some(c => navSet.has(c))) return;
+      if (!cmds.some(c => navSet.has(c.toLowerCase()))) return;
 
       this._scheduleStaleCheck();
     }, "call_service").then(unsub => {
