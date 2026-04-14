@@ -1325,7 +1325,7 @@ class MkraftmanMediaControl extends HTMLElement {
    * don't cause flickering.
    */
   _scheduleStaleCheck() {
-    if (!this._hadRealContent) return;     // nothing to clear
+    if (!this._hadRealContent && !this._confirmedApp) return;  // nothing to clear
     if (this._staleCheckTimer) clearTimeout(this._staleCheckTimer);
 
     const delay = this._config.stale_check_delay || 2000;
