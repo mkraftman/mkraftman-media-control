@@ -1,31 +1,39 @@
 # Mkraftman Media Control
 
-A custom media control card for Home Assistant.
+A custom Lovelace media control card for Home Assistant with automatic artwork fetching, intelligent stale-data detection, and colour-matched backgrounds.
+
+![HACS Badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)
 
 ## Features
 
-- Full-width transport controls (skip back, previous, play/pause, next, skip forward)
-- Draggable seek thumb on progress bar
-- Right-aligned artwork with extracted colour fade
-- Fixed card height (no layout shift between playing/idle)
-- Background resets on app change or return to home screen
-- No power button, three-dots menu, or browse media button
+- **Automatic artwork from TVmaze** — when content plays without artwork (common with BBC iPlayer, Hulu, Peacock), the card searches TVmaze by title and displays show artwork with colour-matched backgrounds. No automations, helpers, or scripts required.
+- **Navigation-based stale detection** — subscribes to HA WebSocket events to detect when Home/Top Menu commands are sent, automatically clearing stale media info that integrations like pyatv retain after the user navigates away.
+- **Colour-extracted backgrounds** — samples artwork colours to generate a tinted background with gradient fade, creating a cohesive look per show.
+- **Full-width transport controls** — configurable button row (skip back, previous, play/pause, next, skip forward) or custom remote commands.
+- **Draggable seek bar** — touch/mouse drag on the progress thumb with live position feedback.
+- **Right-aligned artwork** — content artwork displayed on the right with gradient fade to the extracted background colour on the left.
+- **Fixed card height** — no layout shift between playing and idle states.
+- **App and device logos** — known streaming apps show their logo; unrecognised apps fall back to the device logo (Apple TV, Roku, Google TV).
+- **Pending app display** — shows the correct app name immediately during launch transitions before the entity updates.
+- **Live stream detection** — hides the progress bar when DVR buffer growth is detected.
+- **Phantom play filtering** — ignores Roku's brief "playing" states during menu navigation.
+- **Clean design** — no power button, three-dots menu, or browse media button.
 
 ## Installation
 
 ### HACS (Recommended)
 
 1. Open HACS in Home Assistant
-2. Go to **Frontend** > three-dot menu > **Custom repositories**
+2. Go to **Frontend** → three-dot menu → **Custom repositories**
 3. Add `https://github.com/mkraftman/mkraftman-media-control` as a **Dashboard** repository
 4. Search for "Mkraftman Media Control" and install it
-5. Add the resource in **Settings > Dashboards > Resources** (HACS may do this automatically)
+5. Add the resource in **Settings → Dashboards → Resources** (HACS may do this automatically)
 
 ### Manual
 
 1. Download `mkraftman-media-control.js` from the [latest release](https://github.com/mkraftman/mkraftman-media-control/releases)
 2. Place it in your `www/` folder
-3. Add the resource in **Settings > Dashboards > Resources**:
+3. Add the resource in **Settings → Dashboards → Resources**:
    - URL: `/local/mkraftman-media-control.js`
    - Type: JavaScript Module
 
@@ -33,11 +41,167 @@ A custom media control card for Home Assistant.
 
 ```yaml
 type: custom:mkraftman-media-control
-entity: media_player.your_entity
+entity: media_player.apple_tv_living_room
+```
+
+### With all options
+
+```yaml
+type: custom:mkraftman-media-control
+entity: media_player.apple_tv_living_room
+remote_entity: remote.apple_tv_living_room
+pending_app_entity: input_text.apple_tv_pending_app
+image_entity: input_text.custom_image_override
+nav_commands:
+  - home
+  - top_menu
+stale_check_delay: 2000
+seekable: true
+wake_command: select
+buttons:
+  - icon: mdi:rewind-10
+    command: skipBackward
+    size: skip
+  - icon: mdi:skip-previous
+    command: previousTrack
+  - primary: true
+  - icon: mdi:skip-next
+    command: nextTrack
+  - icon: mdi:fast-forward-10
+    command: skipForward
+    size: skip
 ```
 
 ## Configuration
 
-| Option   | Required | Description              |
-|----------|----------|--------------------------|
-| `entity` | Yes      | A `media_player` entity  |
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `entity` | **Yes** | — | A `media_player` entity |
+| `remote_entity` | No | Derived from entity | The `remote` entity for send_command actions. If omitted, derived by replacing `media_player.` with `remote.` in the entity ID |
+| `pending_app_entity` | No | — | An `input_text` entity set by launch scripts to show the correct app name during transitions |
+| `image_entity` | No | — | An `input_text` entity providing an external image URL override. Takes priority over TVmaze auto-fetch. Retained for backward compatibility; most users won't need this |
+| `nav_commands` | No | `["home", "top_menu"]` | Remote commands that trigger stale-data detection. Matched case-insensitively, so `home` matches Apple TV's `home`, Roku's `home`, and Google TV's `HOME` |
+| `stale_check_delay` | No | `2000` | Milliseconds to wait after a navigation command before checking for stale data. Allows time for new content to start playing |
+| `seekable` | No | `true` | Set to `false` to hide the seek thumb and disable seek-on-click |
+| `wake_command` | No | `"select"` | Remote command sent when play/pause is pressed while the device is idle/standby |
+| `buttons` | No | Apple TV defaults | Array of button definitions for the transport control row |
+
+### Button definitions
+
+Each entry in the `buttons` array can be:
+
+- **Primary (play/pause):** `{ primary: true }` — auto-toggles between play and pause icons
+- **Remote command:** `{ icon: "mdi:skip-next", command: "nextTrack" }` — sends the command via `remote.send_command`
+- **Spacer:** `{ spacer: true }` — invisible placeholder for layout alignment
+- **Skip size:** Add `size: "skip"` for a smaller button (28px icon vs 40px)
+
+### Artwork display cascade
+
+The card resolves background artwork in this priority order:
+
+1. **Native artwork** — `entity_picture` from the integration, with extracted colours
+2. **External override** — URL from `image_entity` (if configured)
+3. **TVmaze auto-fetch** — searched by `media_title` when no `entity_picture` exists, cached per session
+4. **App logo** — from the built-in APP_IMAGE_MAP (Netflix, Disney+, BBC iPlayer, etc.)
+5. **Device logo** — from DEVICE_IMAGE_MAP based on entity ID (Apple TV, Roku, Google TV)
+6. **Hidden** — no background image
+
+### Supported app logos
+
+The card includes built-in logos for: Netflix, Prime Video, YouTube, Disney+, Apple Music, Spotify, Plex, BBC iPlayer, ITVX, Channel 4, My5, Paramount+, discovery+, HBO Max / Max, Hulu, DAZN, Roon, BBC Sounds, Apple TV, Starz, Sky Q, Peacock, UKTV Play — plus Android TV package name variants for all of the above.
+
+## Changelog
+
+### v1.8.3
+
+**Case-insensitive nav command matching for Google TV**
+
+Navigation-based stale detection now matches commands case-insensitively. Apple TV uses `home` (lowercase), Roku uses `home`, and Google TV (Android TV Remote) uses `HOME` (uppercase) — all now match the single default entry `home`. Simplified default `nav_commands` to `["home", "top_menu"]` with no duplicate casing variants needed.
+
+### v1.8.2
+
+**Remove menu/back from default nav_commands**
+
+`menu` and `back` navigate within an app (closing overlays, returning to episode lists) rather than leaving the app entirely. Triggering the stale check on these caused false clears during normal in-app browsing. Default `nav_commands` trimmed to only commands that genuinely leave the app.
+
+### v1.8.1
+
+**Fall back to device name/image after stale navigation**
+
+After stale detection cleared content info, the card still displayed the app name and app logo because pyatv retains `app_name` in entity attributes. The `knownApp` check bypassed the `isTrulyActive` guard, so stale app info kept showing instead of the device fallback.
+
+New `_navStale` flag suppresses the `knownApp` bypass after stale navigation detection or Lovelace page changes. When set, the card falls back to the device friendly name and device logo. Cleared when genuine content plays or a real app change occurs.
+
+**Two cases handled:**
+- **(a) Home screen navigation:** home/top_menu command detected, entity not playing after delay
+- **(b) Dashboard navigation:** Lovelace page change (disconnect/reconnect) with stale entity attributes
+
+### v1.8.0
+
+**Built-in TVmaze artwork fetching**
+
+The card now automatically fetches show artwork from TVmaze's public API when content is playing with a `media_title` but no `entity_picture`. This is entirely client-side — no automations, shell commands, Python scripts, or input_text helpers required.
+
+**Infrastructure this replaces:**
+- 6 automations (fetch/clear for Apple TV, Roku, and BBC iPlayer)
+- 3 `input_text` helpers (`apple_tv_media_image`, `roku_media_image`, `bbc_iplayer_image`)
+- 2 `shell_command` entries (`fetch_tvmaze_image`, `fetch_bbc_iplayer_image`)
+- 2 Python scripts (`fetch_tvmaze_image.py`, `fetch_bbc_image.py`)
+
+**How it works:**
+1. Detects playing content with `media_title` but no `entity_picture`
+2. Searches TVmaze: `https://api.tvmaze.com/singlesearch/shows?q={title}&embed=images`
+3. Prefers landscape "background" images; falls back to show poster
+4. Caches results per title for the browser session (at most one API call per show)
+5. Runs colour extraction on the fetched artwork for background tinting
+6. Generation counter (`_artworkGeneration`) invalidates stale async results after content/app changes
+
+The `image_entity` config option is retained for backward compatibility but is no longer needed for the standard case.
+
+### v1.7.1
+
+**Fix artwork not returning after stale clear**
+
+After the v1.7.0 stale navigation check cleared stale data, returning to the same content failed to restore artwork. The `_scheduleStaleCheck` method was snapshotting `_lastPicture` to the current (stale) value. When content resumed with the same `entity_picture`, `contentChanged` evaluated to false and `_extractColors` never fired — `_customBg` stayed null and the artwork branch failed.
+
+Fixed by not snapshotting `_lastPicture`/`_lastMediaTitle` after clearing. Now `_lastPicture` stays null (as set by `_clearColors`), so the next genuine play triggers `contentChanged = true` and re-extracts colours.
+
+Also removed `select` and d-pad commands (`up`, `down`, `left`, `right`) from default `nav_commands` — these fire too frequently during normal in-app browsing.
+
+### v1.7.0
+
+**Navigation-based stale data detection**
+
+Subscribed to HA WebSocket `call_service` events to detect when remote navigation commands are sent to the configured remote entity. After a configurable delay (default 2 seconds), if the media player is not genuinely playing, the card clears stale artwork, title, and colours.
+
+This is the definitive fix for pyatv (and similar integrations) retaining stale media attributes after the user navigates away from content. The entity data never changes in these cases, so there was previously no trigger for the card to re-evaluate its display state.
+
+**How it works:**
+1. `_subscribeRemoteEvents()` subscribes to `call_service` events on the HA WebSocket connection (once, on first `set hass`)
+2. Filters for `remote.send_command` calls targeting the card's remote entity with a navigation command
+3. `_scheduleStaleCheck()` starts a debounced timer — rapid navigation resets it to avoid flickering
+4. When the timer fires, if the entity state is not `playing`, clears all card state (colours, artwork, `_hadRealContent`, `_navStale`) and calls `_update()`
+5. If the entity *is* playing (e.g. the user pressed select to start content), the clear is skipped
+
+**Config options:**
+- `nav_commands`: override the default navigation command list
+- `stale_check_delay`: override the delay in milliseconds (default: 2000)
+
+### v1.6.5
+
+**Fix stale artwork from async colour extraction race condition**
+
+Added a generation counter (`_colorGeneration`) to prevent a race condition in the async colour extraction pipeline.
+
+**The race condition:** when content starts playing, `_extractColors()` creates an `Image` and starts loading it asynchronously. If the user navigates away before it finishes, `_clearColors()` fires and resets the card state. But then the image load completes and the `onload` callback sets `_customBg` back to the old content's colours, re-showing stale artwork.
+
+**The fix:**
+1. `_clearColors()` increments `_colorGeneration`
+2. `_extractColors()` captures the generation at call time
+3. The `onload` callback checks `gen !== this._colorGeneration` and bails out if a clear happened since the extraction started
+
+Also added `_hadRealContent` guard to the artwork display branch (`realPic && this._customBg && this._hadRealContent`) as defence in depth.
+
+## License
+
+MIT
