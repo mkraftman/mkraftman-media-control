@@ -71,6 +71,7 @@ const APP_IMAGE_MAP = {
   "Sky Q": "/local/images/sky.png",
   "Sky": "/local/images/sky.png",
   "Peacock": "/local/images/peacock.png",
+  "Peacock TV": "/local/images/peacock.png",
   "U": "/local/images/u.png",
   "UKTV": "/local/images/u.png",
   "UKTV Play": "/local/images/u.png",
@@ -113,6 +114,7 @@ const APP_DISPLAY_NAME = {
   "com.hbo.hbonow": "HBO Max",
   "com.wbd.stream": "HBO Max",
   "com.hulu.livingroomplus": "Hulu",
+  "Peacock TV": "Peacock",
   "com.peacocktv.peacockandroid": "Peacock",
   "com.spotify.tv.android": "Spotify",
   "com.dazn": "DAZN",
@@ -1021,9 +1023,11 @@ class MkraftmanMediaControl extends HTMLElement {
     const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || trustApp) ? rawApp : null);
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
-    // FIX 5: Guard with _hadRealContent so a late-arriving _extractColors
-    // callback can't re-show stale artwork after state was cleared.
-    if (realPic && this._customBg && this._hadRealContent) {
+    // Show entity_picture immediately when available, without waiting
+    // for async colour extraction to complete. The default background
+    // (#132532) shows until _extractColors finishes, then transitions
+    // smoothly via CSS. _hadRealContent guards against stale artwork.
+    if (realPic && this._hadRealContent) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
