@@ -15,9 +15,39 @@ A custom Lovelace media control card for Home Assistant with automatic artwork f
 - **Fixed card height** — no layout shift between playing and idle states.
 - **App and device logos** — known streaming apps show their logo; unrecognised apps fall back to the device logo (Apple TV, Roku, Google TV).
 - **Pending app display** — shows the correct app name immediately during launch transitions before the entity updates.
+- **Roon support (Apple TV)** — when Roon is the selected source, the card drives media info and transport from a dedicated Roon `media_player` entity with its own previous / play-pause / next controls. See [Roon support](#roon-support-new-in-v2).
 - **Live stream detection** — hides the progress bar when DVR buffer growth is detected.
 - **Phantom play filtering** — ignores Roku's brief "playing" states during menu navigation.
 - **Clean design** — no power button, three-dots menu, or browse media button.
+
+## Roon support (new in v2)
+
+When the Apple TV's selected source is Roon (the `TV:Remote` source, displayed as **Roon**), the card switches into **Roon mode**: media title, artist, album, artwork and transport are driven by a separate Roon `media_player` entity (default `media_player.roon_tv_area`) instead of the Apple TV, with a dedicated **previous / play-pause / next** control row. Media reads are aliased to the active source, so the normal (non-Roon) path is unchanged.
+
+Roon mode is detected from the **pending app**, not the Apple TV's `app_name`. The Apple TV integration (pyatv) reports `app_name` unreliably during and after Roon use — it can still read "Netflix" while the Roon screen is showing — so the card keys off `pending_app_entity` instead, which the dashboard launch flow sets to `Roon` when the Roon source is chosen.
+
+Because of this:
+
+- **At the launcher, before anything is playing,** the card is already in Roon mode, so the play button targets Roon and starts playback.
+- **Pause/resume and track changes** are reflected from the Roon entity throughout the session.
+- **Selecting any other app** overwrites the pending app, so Roon mode drops immediately — even if Roon is still streaming in the background.
+- **Returning to Roon** picks the session back up, including paused media, which resumes on play.
+
+### Requirements
+
+- A Roon `media_player` entity (set `roon_entity` if it isn't `media_player.roon_tv_area`).
+- `pending_app_entity` configured on the card, with your launch flow setting it to `Roon` for the Roon source. Roon mode only engages while the pending app reads exactly `Roon`.
+
+### Minimal Roon config
+
+```yaml
+type: custom:mkraftman-media-control
+entity: media_player.apple_tv_living_room
+pending_app_entity: input_text.apple_tv_pending_app
+roon_entity: media_player.roon_tv_area   # optional; this is the default
+```
+
+> **Note:** if you switch away from Roon using the Apple TV's *own* remote (rather than the dashboard), no launch action runs to update the pending app, so the card stays in Roon mode until the pending app is changed. In a dashboard-driven setup this path doesn't occur.
 
 ## Installation
 
@@ -51,6 +81,7 @@ type: custom:mkraftman-media-control
 entity: media_player.apple_tv_living_room
 remote_entity: remote.apple_tv_living_room
 pending_app_entity: input_text.apple_tv_pending_app
+roon_entity: media_player.roon_tv_area
 image_entity: input_text.custom_image_override
 nav_commands:
   - home
@@ -78,7 +109,8 @@ buttons:
 |--------|----------|---------|-------------|
 | `entity` | **Yes** | — | A `media_player` entity |
 | `remote_entity` | No | Derived from entity | The `remote` entity for send_command actions. If omitted, derived by replacing `media_player.` with `remote.` in the entity ID |
-| `pending_app_entity` | No | — | An `input_text` entity set by launch scripts to show the correct app name during transitions |
+| `pending_app_entity` | No | — | An `input_text` entity set by launch scripts to show the correct app name during transitions. Also drives Roon mode (see [Roon support](#roon-support-new-in-v2)) |
+| `roon_entity` | No | `media_player.roon_tv_area` | The Roon `media_player` entity the card switches to for media info and transport when the selected source is Roon. Roon mode is triggered by `pending_app_entity` reading `Roon`, so that option must also be set |
 | `image_entity` | No | — | An `input_text` entity providing an external image URL override. Takes priority over TVmaze auto-fetch. Retained for backward compatibility; most users won't need this |
 | `nav_commands` | No | `["home", "top_menu"]` | Remote commands that trigger stale-data detection. Matched case-insensitively, so `home` matches Apple TV's `home`, Roku's `home`, and Google TV's `HOME` |
 | `stale_check_delay` | No | `2000` | Milliseconds to wait after a navigation command before checking for stale data. Allows time for new content to start playing |
@@ -94,6 +126,8 @@ Each entry in the `buttons` array can be:
 - **Remote command:** `{ icon: "mdi:skip-next", command: "nextTrack" }` — sends the command via `remote.send_command`
 - **Spacer:** `{ spacer: true }` — invisible placeholder for layout alignment
 - **Skip size:** Add `size: "skip"` for a smaller button (28px icon vs 40px)
+
+> In Roon mode the configured `buttons` row is replaced by a fixed previous / play-pause / next row that targets the Roon entity.
 
 ### Artwork display cascade
 
@@ -111,6 +145,23 @@ The card resolves background artwork in this priority order:
 The card includes built-in logos for: Netflix, Prime Video, YouTube, Disney+, Apple Music, Spotify, Plex, BBC iPlayer, ITVX, Channel 4, My5, Paramount+, discovery+, HBO Max / Max, Hulu, DAZN, Roon, BBC Sounds, Apple TV, Starz, Sky Q, Peacock, UKTV Play — plus Android TV package name variants for all of the above.
 
 ## Changelog
+
+### v2.0.3
+
+**Roon detection via the pending app**
+
+Roon mode is now keyed off `pending_app_entity` (state `Roon`) rather than the Apple TV's `app_name`. pyatv reports `app_name` unreliably around Roon — often a stale value such as "Netflix" while the Roon screen is showing — so the earlier `app_name`-based detection could never engage reliably. The pending app is set by the dashboard launch flow and stays stable for the whole Roon session.
+
+- Roon mode engages at the launcher before playback, so the play button targets Roon and starts it
+- No longer requires Roon to be playing — the pending app alone (plus the Roon entity existing) is the signal
+- Selecting another app changes the pending value and drops Roon mode immediately, independent of Roon's playback state
+- The idle launcher falls back to the Roon logo, since forcing Roon mode at idle bypasses the previous pending-app draw path
+
+### v2.0.0
+
+**Roon support for Apple TV**
+
+When the Apple TV source is Roon, the card drives media info, artwork and transport from a separate Roon `media_player` entity (default `media_player.roon_tv_area`) instead of the Apple TV, and shows a dedicated previous / play-pause / next control row. Media reads are aliased to the active source, so the non-Roon path is unchanged. New `roon_entity` config option.
 
 ### v1.9.1
 
