@@ -295,15 +295,16 @@ class MkraftmanMediaControl extends HTMLElement {
       !prevPendingState ||
       (prevPendingState.state !== (currPendingState && currPendingState.state))
     );
-    // When Roon is the active source, the new track comes from the Roon entity,
-    // which moves independently of the Apple TV. React to its changes so the
-    // card doesn't bail out and miss an update — but only while the Apple TV is
-    // still in the Roon context (see _inRoonContext). Once the user navigates
-    // to another app, background Roon updates must not keep refreshing the card.
+    // When Roon is the selected source, the new track comes from the Roon
+    // entity, which moves independently of the Apple TV. React to its changes
+    // so the card doesn't bail out and miss an update — but only while Roon is
+    // actually the pending (selected) app. Once another app is selected the
+    // pending value changes, and background Roon updates must not keep
+    // refreshing the card.
     const roonId = this._roonEntityId();
     const prevRoon = prev && prev.states[roonId];
     const currRoon = hass.states[roonId];
-    const roonEntityChanged = this._inRoonContext() && currRoon && (
+    const roonEntityChanged = this._isRoonActive() && currRoon && (
       !prevRoon ||
       prevRoon.last_updated !== currRoon.last_updated ||
       prevRoon.state !== currRoon.state
@@ -1165,7 +1166,11 @@ class MkraftmanMediaControl extends HTMLElement {
       && this._hass.states[this._config.image_entity];
     const externalPic = imageEntity && imageEntity.state && imageEntity.state.length > 0
       ? imageEntity.state : null;
-    const fallbackAppName = showPending ? pendingApp : ((isTrulyActive || trustApp) ? rawApp : null);
+    // In Roon mode, fall back to the Roon logo (rawApp is "TV:Remote") even
+    // before playback starts — the launcher forces Roon mode, which bypasses
+    // the pending-app path that would otherwise have drawn the logo.
+    const fallbackAppName = roonActive ? rawApp
+      : (showPending ? pendingApp : ((isTrulyActive || trustApp) ? rawApp : null));
     const fallbackPic = fallbackAppName
       ? (APP_IMAGE_MAP[fallbackAppName] || null) : null;
     // Show entity_picture immediately when available, without waiting
@@ -1593,33 +1598,28 @@ class MkraftmanMediaControl extends HTMLElement {
     return (this._config && this._config.roon_entity) || "media_player.roon_tv_area";
   }
 
-  /* True while the Apple TV is showing the Roon context. pyatv reports
-     app_name "TV:Remote" at the Roon launcher and "Music" (app_id
-     com.apple.TVMusic) during Roon playback. Any other app_name — or none at
-     all — means the user has navigated away to another app. */
-  _inRoonContext() {
-    const primary = this._hass && this._config
-      && this._hass.states[this._config.entity];
-    if (!primary) return false;
-    const ap = primary.attributes;
-    return ap.app_name === "TV:Remote"
-      || ap.app_name === "Music"
-      || ap.app_id === "com.apple.TVMusic";
+  /* True when Roon is the pending (selected) app. The dashboard's launch flow
+     sets pending_app_entity to "Roon" when the Roon source (TV:Remote) is
+     chosen, and to the app name for every other source. The Apple TV's own
+     app_name attribute is unreliable — pyatv reports stale values after
+     switching apps (e.g. "Netflix" while the Roon screen is showing) — so the
+     pending app, driven by the dashboard, is the dependable Roon signal. */
+  _isRoonPending() {
+    const peId = this._config && this._config.pending_app_entity;
+    if (!peId || !this._hass) return false;
+    const pe = this._hass.states[peId];
+    return !!(pe && pe.state === "Roon");
   }
 
-  /* Roon is the active source only while the Apple TV is in the Roon context
-     (see _inRoonContext) AND the Roon entity is playing/buffering/paused. As
-     soon as the app_name leaves the Roon context — another app, or none at
-     all — we drop Roon mode and fall back to the Apple TV view, even if Roon
-     is still streaming in the background. */
+  /* Roon is the active source whenever it's the pending app (see
+     _isRoonPending) and the Roon entity exists. This holds at the launcher
+     before playback starts — so the play button targets Roon and starts it —
+     and right through playback. Selecting any other app changes the pending
+     value and drops Roon mode immediately, even if Roon is still streaming. */
   _isRoonActive() {
     if (!this._hass || !this._config) return false;
-    if (!this._inRoonContext()) return false;
-    const roon = this._hass.states[this._roonEntityId()];
-    if (!roon) return false;
-    return roon.state === "playing"
-      || roon.state === "buffering"
-      || roon.state === "paused";
+    if (!this._isRoonPending()) return false;
+    return !!this._hass.states[this._roonEntityId()];
   }
 
   /* Returns the entity that media info and transport controls target: the
