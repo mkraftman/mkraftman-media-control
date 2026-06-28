@@ -296,14 +296,14 @@ class MkraftmanMediaControl extends HTMLElement {
       (prevPendingState.state !== (currPendingState && currPendingState.state))
     );
     // When Roon is the active source, the new track comes from the Roon entity,
-    // which moves independently of the Apple TV. React whenever it changes so
-    // the card doesn't bail out and miss the update. Detection is by the Roon
-    // entity's own state (see _isRoonActive) because pyatv reports the Apple
-    // TV's app_name as "Music" during Roon playback, not "TV:Remote".
+    // which moves independently of the Apple TV. React to its changes so the
+    // card doesn't bail out and miss an update — but only while the Apple TV is
+    // still in the Roon context (see _inRoonContext). Once the user navigates
+    // to another app, background Roon updates must not keep refreshing the card.
     const roonId = this._roonEntityId();
     const prevRoon = prev && prev.states[roonId];
     const currRoon = hass.states[roonId];
-    const roonEntityChanged = currRoon && (
+    const roonEntityChanged = this._inRoonContext() && currRoon && (
       !prevRoon ||
       prevRoon.last_updated !== currRoon.last_updated ||
       prevRoon.state !== currRoon.state
@@ -1593,23 +1593,33 @@ class MkraftmanMediaControl extends HTMLElement {
     return (this._config && this._config.roon_entity) || "media_player.roon_tv_area";
   }
 
-  /* Roon is the active source when its media_player is actively playing or
-     buffering, or paused while the Apple TV is still in its music/Roon
-     context. pyatv reports the Apple TV's app_name as "Music" (app_id
-     com.apple.TVMusic) during Roon playback and only "TV:Remote" at the
-     launcher, so app_name alone is unreliable — the Roon entity's own state
-     is the dependable signal. */
+  /* True while the Apple TV is showing the Roon context. pyatv reports
+     app_name "TV:Remote" at the Roon launcher and "Music" (app_id
+     com.apple.TVMusic) during Roon playback. Any other app_name — or none at
+     all — means the user has navigated away to another app. */
+  _inRoonContext() {
+    const primary = this._hass && this._config
+      && this._hass.states[this._config.entity];
+    if (!primary) return false;
+    const ap = primary.attributes;
+    return ap.app_name === "TV:Remote"
+      || ap.app_name === "Music"
+      || ap.app_id === "com.apple.TVMusic";
+  }
+
+  /* Roon is the active source only while the Apple TV is in the Roon context
+     (see _inRoonContext) AND the Roon entity is playing/buffering/paused. As
+     soon as the app_name leaves the Roon context — another app, or none at
+     all — we drop Roon mode and fall back to the Apple TV view, even if Roon
+     is still streaming in the background. */
   _isRoonActive() {
     if (!this._hass || !this._config) return false;
-    const primary = this._hass.states[this._config.entity];
+    if (!this._inRoonContext()) return false;
     const roon = this._hass.states[this._roonEntityId()];
-    if (!primary || !roon) return false;
-    if (roon.state === "playing" || roon.state === "buffering") return true;
-    if (roon.state !== "paused") return false;
-    const ap = primary.attributes;
-    return ap.app_id === "com.apple.TVMusic"
-      || ap.app_name === "Music"
-      || ap.app_name === "TV:Remote";
+    if (!roon) return false;
+    return roon.state === "playing"
+      || roon.state === "buffering"
+      || roon.state === "paused";
   }
 
   /* Returns the entity that media info and transport controls target: the
