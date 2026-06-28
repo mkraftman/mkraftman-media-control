@@ -22,6 +22,8 @@
  *   stale_check_delay:  (optional) ms before stale check fires (default: 2000)
  *   seekable:           (optional) enable/disable seek bar (default: true)
  *   wake_command:       (optional) command to wake from idle (default: "select")
+ *   roon_entity:        (optional) Roon media_player entity to use when the Apple TV
+ *                       source is Roon (default: media_player.roon_tv_area)
  *   buttons:            (optional) array of button definitions:
  *     - icon: mdi icon name
  *       command: remote command string (uses remote_entity)
@@ -293,14 +295,15 @@ class MkraftmanMediaControl extends HTMLElement {
       !prevPendingState ||
       (prevPendingState.state !== (currPendingState && currPendingState.state))
     );
-    // When the Roon source is active on the Apple TV, track changes (and the
-    // new track) come from the Roon entity, which moves independently of the
-    // Apple TV. Don't bail out when it changes, or the card would never update.
-    const roonId = this._config.roon_entity || "media_player.roon_tv_area";
-    const roonRelevant = entity.attributes.app_name === "TV:Remote";
+    // When Roon is the active source, the new track comes from the Roon entity,
+    // which moves independently of the Apple TV. React whenever it changes so
+    // the card doesn't bail out and miss the update. Detection is by the Roon
+    // entity's own state (see _isRoonActive) because pyatv reports the Apple
+    // TV's app_name as "Music" during Roon playback, not "TV:Remote".
+    const roonId = this._roonEntityId();
     const prevRoon = prev && prev.states[roonId];
     const currRoon = hass.states[roonId];
-    const roonEntityChanged = roonRelevant && currRoon && (
+    const roonEntityChanged = currRoon && (
       !prevRoon ||
       prevRoon.last_updated !== currRoon.last_updated ||
       prevRoon.state !== currRoon.state
@@ -322,11 +325,10 @@ class MkraftmanMediaControl extends HTMLElement {
     // navigation and clear stale data that pyatv never updates.
     this._subscribeRemoteEvents();
 
-    // Roon mode: the Apple TV reports the Roon source ("TV:Remote") and a Roon
-    // media_player is available. Roon reports state/artwork reliably, so drive
-    // colour extraction straight from it and skip the Apple TV stale-attribute
-    // heuristics below.
-    if (roonRelevant && currRoon) {
+    // Roon mode: Roon is the active source on the Apple TV. Roon reports
+    // state/artwork reliably, so drive colour extraction straight from it and
+    // skip the Apple TV stale-attribute heuristics below.
+    if (this._isRoonActive()) {
       const rpic = currRoon.attributes.entity_picture
         || currRoon.attributes.entity_picture_local || null;
       const rtitle = currRoon.attributes.media_title || null;
@@ -1015,14 +1017,14 @@ class MkraftmanMediaControl extends HTMLElement {
     const a = entity.attributes;
     const el = this._el;
 
-    // Roon mode: when the Apple TV source is Roon ("TV:Remote") and a Roon
-    // media_player is available, media info, artwork and transport come from
-    // the Roon entity instead of the Apple TV. mEntity/m/mState alias the
-    // active media source — they equal the configured entity when Roon isn't
-    // active, so the normal (non-Roon) path is byte-for-byte unchanged.
-    const roonId = this._config.roon_entity || "media_player.roon_tv_area";
+    // Roon mode: when Roon is the active source (see _isRoonActive), media
+    // info, artwork and transport come from the Roon entity instead of the
+    // Apple TV. mEntity/m/mState alias the active media source — they equal
+    // the configured entity when Roon isn't active, so the normal (non-Roon)
+    // path is byte-for-byte unchanged.
+    const roonId = this._roonEntityId();
     const roonEntity = this._hass.states[roonId];
-    const roonActive = a.app_name === "TV:Remote" && !!roonEntity;
+    const roonActive = this._isRoonActive();
     const mEntity = roonActive ? roonEntity : entity;
     const m = mEntity.attributes;
     const mState = mEntity.state;
@@ -1587,18 +1589,34 @@ class MkraftmanMediaControl extends HTMLElement {
     });
   }
 
-  /* Returns the entity that media info and transport controls should target.
-     When the Apple TV reports the Roon source ("TV:Remote") and a Roon
-     media_player is available, that Roon entity drives the card; otherwise
-     the configured entity is used. */
+  _roonEntityId() {
+    return (this._config && this._config.roon_entity) || "media_player.roon_tv_area";
+  }
+
+  /* Roon is the active source when its media_player is actively playing or
+     buffering, or paused while the Apple TV is still in its music/Roon
+     context. pyatv reports the Apple TV's app_name as "Music" (app_id
+     com.apple.TVMusic) during Roon playback and only "TV:Remote" at the
+     launcher, so app_name alone is unreliable — the Roon entity's own state
+     is the dependable signal. */
+  _isRoonActive() {
+    if (!this._hass || !this._config) return false;
+    const primary = this._hass.states[this._config.entity];
+    const roon = this._hass.states[this._roonEntityId()];
+    if (!primary || !roon) return false;
+    if (roon.state === "playing" || roon.state === "buffering") return true;
+    if (roon.state !== "paused") return false;
+    const ap = primary.attributes;
+    return ap.app_id === "com.apple.TVMusic"
+      || ap.app_name === "Music"
+      || ap.app_name === "TV:Remote";
+  }
+
+  /* Returns the entity that media info and transport controls target: the
+     Roon entity when Roon is the active source, else the configured entity. */
   _mediaEntityId() {
     if (!this._hass || !this._config) return this._config && this._config.entity;
-    const primary = this._hass.states[this._config.entity];
-    const roonId = this._config.roon_entity || "media_player.roon_tv_area";
-    if (primary && primary.attributes.app_name === "TV:Remote"
-        && this._hass.states[roonId]) {
-      return roonId;
-    }
+    if (this._isRoonActive()) return this._roonEntityId();
     return this._config.entity;
   }
 
