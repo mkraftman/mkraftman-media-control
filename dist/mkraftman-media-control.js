@@ -99,6 +99,7 @@ const APP_IMAGE_MAP = {
 // Map Android TV package names (and other IDs) to user-friendly display names
 const APP_DISPLAY_NAME = {
   "TV": "Apple TV",
+  "Music": "Apple Music",
   "com.apple.TVWatchList": "Apple TV",
   "bbc.iplayer.android": "BBC iPlayer",
   "com.google.android.youtube.tv": "YouTube",
@@ -503,6 +504,20 @@ class MkraftmanMediaControl extends HTMLElement {
         overflow: hidden;
         text-overflow: ellipsis;
         color: var(--mc-fg);
+        flex: 1;
+        min-width: 0;
+      }
+      .name-right {
+        font-size: 18px;
+        font-weight: 500;
+        opacity: 0.85;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--mc-fg);
+        flex-shrink: 0;
+        max-width: 50%;
+        text-align: right;
       }
 
       /* media info */
@@ -523,6 +538,21 @@ class MkraftmanMediaControl extends HTMLElement {
         color: var(--mc-fg);
         margin-bottom: 2px;
       }
+      .album {
+        font-size: 18px;
+        font-weight: 500;
+        opacity: 0.85;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--mc-fg);
+      }
+      /* tightened spacing only when the album (third line) is shown */
+      .three-line .top { margin-bottom: 0; }
+      .three-line .title { margin-bottom: 0; line-height: 1.2; }
+      .three-line .name,
+      .three-line .name-right,
+      .three-line .album { line-height: 1.2; }
       .status {
         display: none;
       }
@@ -662,7 +692,10 @@ class MkraftmanMediaControl extends HTMLElement {
 
     const name = document.createElement("span");
     name.className = "name";
-    top.append(name);
+    const nameRight = document.createElement("span");
+    nameRight.className = "name-right";
+    nameRight.style.display = "none";
+    top.append(name, nameRight);
 
     // info
     const info = document.createElement("div");
@@ -671,10 +704,14 @@ class MkraftmanMediaControl extends HTMLElement {
     const title = document.createElement("div");
     title.className = "title";
 
+    const album = document.createElement("div");
+    album.className = "album";
+    album.style.display = "none";
+
     const status = document.createElement("div");
     status.className = "status";
 
-    info.append(title, status);
+    info.append(title, album, status);
 
     // controls
     const controls = document.createElement("div");
@@ -730,7 +767,9 @@ class MkraftmanMediaControl extends HTMLElement {
       bgImage,
       bgGrad,
       name,
+      nameRight,
       title,
+      album,
       status,
       info,
       btnMap,
@@ -1003,7 +1042,7 @@ class MkraftmanMediaControl extends HTMLElement {
     // previous app) OR when the player isn't truly active yet
     const showPending = pendingApp && (!isTrulyActive || !appMatchesPending);
     const trustApp = knownApp && !this._navStale;
-    el.name.textContent = showPending
+    const appText = showPending
       ? pendingApp
       : ((isTrulyActive || trustApp) ? (appName || friendlyName) : friendlyName);
 
@@ -1011,6 +1050,26 @@ class MkraftmanMediaControl extends HTMLElement {
     const hasTitle = isTrulyActive && !showPending && !!a.media_title;
     el.title.textContent = hasTitle ? a.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
+
+    // When real media is playing and an artist is reported, show the artist in
+    // the app-name position (left) and move the app name to the right edge.
+    const showArtist = hasTitle && !!a.media_artist;
+    if (showArtist) {
+      el.name.textContent = a.media_artist;
+      el.nameRight.textContent = appText;
+      el.nameRight.style.display = "";
+    } else {
+      el.name.textContent = appText;
+      el.nameRight.textContent = "";
+      el.nameRight.style.display = "none";
+    }
+
+    // Third line: album name (when present). Tighten line spacing via the
+    // .three-line class so all three lines clear the play controls.
+    const showAlbum = hasTitle && !!a.media_album_name;
+    el.album.textContent = showAlbum ? a.media_album_name : "";
+    el.album.style.display = showAlbum ? "" : "none";
+    el.card.classList.toggle("three-line", showAlbum);
 
     // artwork background — suppress during phantom plays and app transitions
     const realPic = !isPhantomPlay && !showPending
