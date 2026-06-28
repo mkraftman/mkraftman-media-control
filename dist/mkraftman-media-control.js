@@ -62,6 +62,7 @@ const APP_IMAGE_MAP = {
   "Hulu": "/local/images/hulu.png",
   "DAZN": "/local/images/dazn.png",
   "Roon": "/local/images/roon.png",
+  "TV:Remote": "/local/images/roon.png",
   "BBC Sounds": "/local/images/bbc-sounds.png",
   "Apple TV": "/local/images/apple-tv.png",
   "TV": "/local/images/apple-tv.png",
@@ -100,6 +101,7 @@ const APP_IMAGE_MAP = {
 const APP_DISPLAY_NAME = {
   "TV": "Apple TV",
   "Music": "Apple Music",
+  "TV:Remote": "Roon",
   "com.apple.TVWatchList": "Apple TV",
   "bbc.iplayer.android": "BBC iPlayer",
   "com.google.android.youtube.tv": "YouTube",
@@ -291,12 +293,25 @@ class MkraftmanMediaControl extends HTMLElement {
       !prevPendingState ||
       (prevPendingState.state !== (currPendingState && currPendingState.state))
     );
+    // When the Roon source is active on the Apple TV, track changes (and the
+    // new track) come from the Roon entity, which moves independently of the
+    // Apple TV. Don't bail out when it changes, or the card would never update.
+    const roonId = this._config.roon_entity || "media_player.roon_tv_area";
+    const roonRelevant = entity.attributes.app_name === "TV:Remote";
+    const prevRoon = prev && prev.states[roonId];
+    const currRoon = hass.states[roonId];
+    const roonEntityChanged = roonRelevant && currRoon && (
+      !prevRoon ||
+      prevRoon.last_updated !== currRoon.last_updated ||
+      prevRoon.state !== currRoon.state
+    );
     if (
       prevEntity &&
       prevEntity.last_updated === entity.last_updated &&
       prevEntity.state === entity.state &&
       !imageEntityChanged &&
-      !pendingEntityChanged
+      !pendingEntityChanged &&
+      !roonEntityChanged
     ) {
       return;
     }
@@ -306,6 +321,28 @@ class MkraftmanMediaControl extends HTMLElement {
     // FIX 6: Subscribe to remote command events (once) so we can detect
     // navigation and clear stale data that pyatv never updates.
     this._subscribeRemoteEvents();
+
+    // Roon mode: the Apple TV reports the Roon source ("TV:Remote") and a Roon
+    // media_player is available. Roon reports state/artwork reliably, so drive
+    // colour extraction straight from it and skip the Apple TV stale-attribute
+    // heuristics below.
+    if (roonRelevant && currRoon) {
+      const rpic = currRoon.attributes.entity_picture
+        || currRoon.attributes.entity_picture_local || null;
+      const rtitle = currRoon.attributes.media_title || null;
+      if (rpic !== this._lastPicture || rtitle !== this._lastMediaTitle) {
+        this._lastPicture = rpic;
+        this._lastMediaTitle = rtitle;
+        this._isLiveStream = false;
+        this._prevMediaDuration = null;
+        if (rpic) this._extractColors(rpic);
+        else this._clearColors();
+      }
+      // Track the app so leaving Roon is detected as a genuine app change.
+      this._prevAppName = entity.attributes.app_name;
+      this._update();
+      return;
+    }
 
     // Compute content attributes early — needed for both app-change and
     // content-change detection below.
@@ -730,6 +767,28 @@ class MkraftmanMediaControl extends HTMLElement {
       btnMap[b.id] = { btn, ic };
     }
 
+    // Roon control row — shown only when the Roon source ("TV:Remote") is
+    // active on the Apple TV. Fixed transport set (previous / play-pause /
+    // next); all three target the Roon entity via _mediaEntityId().
+    const roonControls = document.createElement("div");
+    roonControls.className = "controls roon-controls";
+    roonControls.style.display = "none";
+    const roonBtnDefs = [
+      { id: "roon_prev", icon: "mdi:skip-previous", cls: "ctrl", service: "media_previous_track" },
+      { id: "roon_pp", icon: "mdi:play", cls: "ctrl pp", service: "media_play_pause" },
+      { id: "roon_next", icon: "mdi:skip-next", cls: "ctrl", service: "media_next_track" },
+    ];
+    for (const b of roonBtnDefs) {
+      const btn = document.createElement("button");
+      btn.className = b.cls;
+      const ic = document.createElement("ha-icon");
+      ic.setAttribute("icon", b.icon);
+      btn.appendChild(ic);
+      btn.addEventListener("click", () => this._callService(b.service));
+      roonControls.appendChild(btn);
+      btnMap[b.id] = { btn, ic };
+    }
+
     // progress
     const prog = document.createElement("div");
     prog.className = "prog";
@@ -756,7 +815,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
     prog.append(bar, times);
 
-    player.append(top, info, controls, prog);
+    player.append(top, info, controls, roonControls, prog);
     card.append(bg, player);
     shadow.appendChild(card);
 
@@ -772,6 +831,8 @@ class MkraftmanMediaControl extends HTMLElement {
       album,
       status,
       info,
+      controls,
+      roonControls,
       btnMap,
       prog,
       bar,
@@ -887,7 +948,7 @@ class MkraftmanMediaControl extends HTMLElement {
         this._el.fill.style.width = frac * 100 + "%";
         this._el.thumb.style.left = frac * 100 + "%";
         // Update position display during drag
-        const entity = this._hass && this._hass.states[this._config.entity];
+        const entity = this._hass && this._hass.states[this._mediaEntityId()];
         if (entity && entity.attributes.media_duration) {
           this._el.pos.textContent = this._formatTime(frac * entity.attributes.media_duration);
         }
@@ -908,7 +969,7 @@ class MkraftmanMediaControl extends HTMLElement {
         const clientX = ev.changedTouches ? ev.changedTouches[0].clientX : ev.clientX;
         const rect = bar.getBoundingClientRect();
         const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        const entity = this._hass && this._hass.states[this._config.entity];
+        const entity = this._hass && this._hass.states[this._mediaEntityId()];
         if (entity && entity.attributes.media_duration) {
           this._callService("media_seek", {
             seek_position: frac * entity.attributes.media_duration,
@@ -918,7 +979,7 @@ class MkraftmanMediaControl extends HTMLElement {
         // Small delay before re-enabling to avoid click handler firing
         setTimeout(() => {
           this._dragging = false;
-          const ent = this._hass && this._hass.states[this._config.entity];
+          const ent = this._hass && this._hass.states[this._mediaEntityId()];
           if (ent && ent.state === "playing") this._startTimer();
         }, 50);
       };
@@ -954,22 +1015,39 @@ class MkraftmanMediaControl extends HTMLElement {
     const a = entity.attributes;
     const el = this._el;
 
+    // Roon mode: when the Apple TV source is Roon ("TV:Remote") and a Roon
+    // media_player is available, media info, artwork and transport come from
+    // the Roon entity instead of the Apple TV. mEntity/m/mState alias the
+    // active media source — they equal the configured entity when Roon isn't
+    // active, so the normal (non-Roon) path is byte-for-byte unchanged.
+    const roonId = this._config.roon_entity || "media_player.roon_tv_area";
+    const roonEntity = this._hass.states[roonId];
+    const roonActive = a.app_name === "TV:Remote" && !!roonEntity;
+    const mEntity = roonActive ? roonEntity : entity;
+    const m = mEntity.attributes;
+    const mState = mEntity.state;
+
+    // Swap the transport row: dedicated Roon controls (prev / play-pause /
+    // next) in Roon mode, the normal controls otherwise.
+    if (el.controls) el.controls.style.display = roonActive ? "none" : "";
+    if (el.roonControls) el.roonControls.style.display = roonActive ? "" : "none";
+
     const isOff = state === "off" || state === "unavailable";
-    const hasRealPic = !!(a.entity_picture || a.entity_picture_local);
+    const hasRealPic = !!(m.entity_picture || m.entity_picture_local);
 
     // Roku reports "playing" with ~3s phantom durations during menu/home nav;
     // treat that as idle so we don't flip the icon, show fallback art, etc.
     const PHANTOM_THRESHOLD = 5;
     const MIN_DURATION = 60;
-    const isPhantomPlay = state === "playing"
-      && a.media_duration > 0 && a.media_duration < PHANTOM_THRESHOLD;
-    const isPlaying = state === "playing" && !isPhantomPlay;
+    const isPhantomPlay = !roonActive && mState === "playing"
+      && m.media_duration > 0 && m.media_duration < PHANTOM_THRESHOLD;
+    const isPlaying = mState === "playing" && !isPhantomPlay;
 
     // card off styling
     el.card.classList.toggle("off", isOff);
 
     // top row — entity name when idle, app name when playing
-    const isActive = ["playing", "paused", "buffering"].includes(state) && !isPhantomPlay;
+    const isActive = ["playing", "paused", "buffering"].includes(mState) && !isPhantomPlay;
 
     // When paused, treat as active if:
     // - we have extracted colours from a prior playing state (genuine pause), OR
@@ -982,20 +1060,22 @@ class MkraftmanMediaControl extends HTMLElement {
     // - on Google TV only: valid progress info (duration + position) — Cast clears this
     //   reliably on home/app switch unlike Apple TV which keeps stale data
     const isGoogleTV = this._config.entity && this._config.entity.includes("google_tv");
-    const hasProgress = a.media_duration > 0 && a.media_position !== undefined && a.media_position !== null;
-    const isTrulyActive = isActive && (isPlaying
+    const hasProgress = m.media_duration > 0 && m.media_position !== undefined && m.media_position !== null;
+    const isTrulyActive = isActive && (roonActive || isPlaying
       // FIX: guard all paused-state branches with _hadRealContent to prevent
       // stale Roku/Google TV attributes showing after content ends. Roku often
       // stays paused with entity_picture + customBg intact; Google TV can retain
       // progress data across Cast sessions. _hadRealContent is only set when we
       // observe genuine playing state, so a real pause still passes through.
       || (hasRealPic && this._customBg && this._hadRealContent)
-      || (!hasRealPic && !!a.media_title && (isPlaying || this._hadRealContent))
+      || (!hasRealPic && !!m.media_title && (isPlaying || this._hadRealContent))
       || (isGoogleTV && hasProgress && this._hadRealContent));
 
     // Use _confirmedApp when the entity isn't playing and we have one —
     // pyatv can report stale/wrong app_name during in-app menu navigation.
-    const rawApp = (!isPlaying && this._confirmedApp) ? this._confirmedApp : a.app_name;
+    // In Roon mode the app is always "TV:Remote" (displayed as "Roon").
+    const rawApp = roonActive ? "TV:Remote"
+      : ((!isPlaying && this._confirmedApp) ? this._confirmedApp : a.app_name);
     const appName = APP_DISPLAY_NAME[rawApp] || rawApp;
     // Whether the current app is recognised in APP_IMAGE_MAP (including package names)
     const knownApp = !!(rawApp && APP_IMAGE_MAP[rawApp]);
@@ -1003,11 +1083,14 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // play / pause icon — use toggle icon when state is ambiguous:
     // "on" = no Cast info at all; "playing" with no media info = Cast state unreliable
-    const hasMediaInfo = !!(a.media_title || a.media_duration || a.entity_picture || a.entity_picture_local);
-    const ambiguousState = state === "on" || (isPlaying && !hasMediaInfo);
+    const hasMediaInfo = !!(m.media_title || m.media_duration || m.entity_picture || m.entity_picture_local);
+    const ambiguousState = !roonActive && (state === "on" || (isPlaying && !hasMediaInfo));
     const ppIcon = ambiguousState ? "mdi:play-pause"
       : (isPlaying ? "mdi:pause" : "mdi:play");
     el.btnMap.pp.ic.setAttribute("icon", ppIcon);
+    if (el.btnMap.roon_pp) {
+      el.btnMap.roon_pp.ic.setAttribute("icon", isPlaying ? "mdi:pause" : "mdi:play");
+    }
 
     // Pending app: set by launch scripts to show correct app immediately
     // before the entity updates. Cleared when real content starts playing.
@@ -1023,12 +1106,12 @@ class MkraftmanMediaControl extends HTMLElement {
     // Clear pending app when:
     // 1. The expected app is now playing with real content, OR
     // 2. A completely different app has loaded (pending is stale)
-    if (pendingApp && appMatchesPending && isPlaying && !ambiguousState) {
+    if (!roonActive && pendingApp && appMatchesPending && isPlaying && !ambiguousState) {
       this._hass.callService("input_text", "set_value", {
         entity_id: this._config.pending_app_entity,
         value: "",
       });
-    } else if (pendingApp && !appMatchesPending && isPlaying) {
+    } else if (!roonActive && pendingApp && !appMatchesPending && isPlaying) {
       // Only clear pending on app mismatch when genuinely playing.
       // When paused/idle, pyatv may report stale app_name that doesn't
       // match the pending app — don't clear pending in that case.
@@ -1040,22 +1123,23 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Show pending app when the entity hasn't caught up yet (stale data from
     // previous app) OR when the player isn't truly active yet
-    const showPending = pendingApp && (!isTrulyActive || !appMatchesPending);
+    const showPending = !roonActive && pendingApp && (!isTrulyActive || !appMatchesPending);
     const trustApp = knownApp && !this._navStale;
-    const appText = showPending
-      ? pendingApp
-      : ((isTrulyActive || trustApp) ? (appName || friendlyName) : friendlyName);
+    const appText = roonActive ? "Roon"
+      : (showPending
+        ? pendingApp
+        : ((isTrulyActive || trustApp) ? (appName || friendlyName) : friendlyName));
 
     // media info — only show title when truly active AND not showing stale data
-    const hasTitle = isTrulyActive && !showPending && !!a.media_title;
-    el.title.textContent = hasTitle ? a.media_title : "\u00A0";
+    const hasTitle = isTrulyActive && !showPending && !!m.media_title;
+    el.title.textContent = hasTitle ? m.media_title : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
     // When real media is playing and an artist is reported, show the artist in
     // the app-name position (left) and move the app name to the right edge.
-    const showArtist = hasTitle && !!a.media_artist;
+    const showArtist = hasTitle && !!m.media_artist;
     if (showArtist) {
-      el.name.textContent = a.media_artist;
+      el.name.textContent = m.media_artist;
       el.nameRight.textContent = appText;
       el.nameRight.style.display = "";
     } else {
@@ -1066,14 +1150,14 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Third line: album name (when present). Tighten line spacing via the
     // .three-line class so all three lines clear the play controls.
-    const showAlbum = hasTitle && !!a.media_album_name;
-    el.album.textContent = showAlbum ? a.media_album_name : "";
+    const showAlbum = hasTitle && !!m.media_album_name;
+    el.album.textContent = showAlbum ? m.media_album_name : "";
     el.album.style.display = showAlbum ? "" : "none";
     el.card.classList.toggle("three-line", showAlbum);
 
     // artwork background — suppress during phantom plays and app transitions
     const realPic = !isPhantomPlay && !showPending
-      ? (a.entity_picture || a.entity_picture_local || null) : null;
+      ? (m.entity_picture || m.entity_picture_local || null) : null;
     // image_entity: external image URL from an input_text helper (e.g. BBC iPlayer API)
     const imageEntity = this._config.image_entity
       && this._hass.states[this._config.image_entity];
@@ -1086,7 +1170,7 @@ class MkraftmanMediaControl extends HTMLElement {
     // for async colour extraction to complete. The default background
     // (#132532) shows until _extractColors finishes, then transitions
     // smoothly via CSS. _hadRealContent guards against stale artwork.
-    if (realPic && this._hadRealContent) {
+    if (realPic && (this._hadRealContent || roonActive)) {
       el.bgImage.style.backgroundImage = "url('" + realPic + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
@@ -1122,7 +1206,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // progress — use visibility:hidden to reserve space (no card height shift)
     // Detect live TV: duration growing over time means DVR buffer (live stream)
-    const dur = a.media_duration;
+    const dur = m.media_duration;
     if (dur > 0 && this._prevMediaDuration !== null && dur > this._prevMediaDuration + 2) {
       this._isLiveStream = true;
     } else if (dur > 0 && this._prevMediaDuration !== null && dur < this._prevMediaDuration - 2) {
@@ -1132,7 +1216,7 @@ class MkraftmanMediaControl extends HTMLElement {
     if (dur > 0) this._prevMediaDuration = dur;
 
     const hasProg = isTrulyActive &&
-      dur >= MIN_DURATION && a.media_position !== undefined && a.media_position !== null && !this._isLiveStream;
+      dur >= MIN_DURATION && m.media_position !== undefined && m.media_position !== null && !this._isLiveStream;
     el.prog.classList.toggle("no-progress", !hasProg);
 
     if (!hasProg) {
@@ -1144,11 +1228,11 @@ class MkraftmanMediaControl extends HTMLElement {
     }
 
     if (hasProg && !this._dragging) {
-      const frac = this._fraction(entity);
+      const frac = this._fraction(mEntity);
       el.fill.style.width = frac * 100 + "%";
       el.thumb.style.left = frac * 100 + "%";
-      el.pos.textContent = this._formatTime(this._currentPos(entity));
-      el.dur.textContent = this._formatTime(a.media_duration);
+      el.pos.textContent = this._formatTime(this._currentPos(mEntity));
+      el.dur.textContent = this._formatTime(m.media_duration);
     }
 
     // timer
@@ -1438,7 +1522,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
   _tickProgress() {
     if (!this._hass || !this._config || !this._built || this._dragging) return;
-    const entity = this._hass.states[this._config.entity];
+    const entity = this._hass.states[this._mediaEntityId()];
     if (!entity || !entity.attributes.media_duration) return;
 
     const frac = this._fraction(entity);
@@ -1503,17 +1587,32 @@ class MkraftmanMediaControl extends HTMLElement {
     });
   }
 
+  /* Returns the entity that media info and transport controls should target.
+     When the Apple TV reports the Roon source ("TV:Remote") and a Roon
+     media_player is available, that Roon entity drives the card; otherwise
+     the configured entity is used. */
+  _mediaEntityId() {
+    if (!this._hass || !this._config) return this._config && this._config.entity;
+    const primary = this._hass.states[this._config.entity];
+    const roonId = this._config.roon_entity || "media_player.roon_tv_area";
+    if (primary && primary.attributes.app_name === "TV:Remote"
+        && this._hass.states[roonId]) {
+      return roonId;
+    }
+    return this._config.entity;
+  }
+
   _callService(service, data) {
     if (!this._hass || !this._config) return;
     this._hass.callService("media_player", service, {
-      entity_id: this._config.entity,
+      entity_id: this._mediaEntityId(),
       ...(data || {}),
     });
   }
 
   _seekRelative(delta) {
     const entity =
-      this._hass && this._hass.states[this._config && this._config.entity];
+      this._hass && this._hass.states[this._mediaEntityId()];
     if (!entity || entity.attributes.media_position === undefined) return;
     const pos = this._currentPos(entity);
     const dur = entity.attributes.media_duration || Infinity;
@@ -1524,7 +1623,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
   _seekAbsolute(e) {
     const entity =
-      this._hass && this._hass.states[this._config && this._config.entity];
+      this._hass && this._hass.states[this._mediaEntityId()];
     if (!entity || !entity.attributes.media_duration) return;
     const rect = this._el.bar.getBoundingClientRect();
     const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
