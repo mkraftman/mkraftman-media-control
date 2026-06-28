@@ -1,23 +1,53 @@
-name: Publish release asset
+name: Release (on publish or tag push)
 
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
+
+# Serialise any runs for the same tag so the two trigger paths can't race.
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve tag name
+        id: tag
+        run: echo "name=${{ github.event.release.tag_name || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      # Double-fire guard: on a tag push, stand down if a release for this tag
+      # already exists (it means a UI publish already handled, or is handling,
+      # this tag via the release:published path). Skipped on the release event.
+      - name: Stand down if release already exists (tag-push only)
+        id: check
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout tagged commit
+        if: github.event_name == 'release' || steps.check.outputs.exists == 'false'
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ steps.tag.outputs.name }}
 
       - name: Attach asset to release
+        if: github.event_name == 'release' || steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ steps.tag.outputs.name }}
           files: dist/mkraftman-media-control.js
+          generate_release_notes: ${{ github.event_name == 'push' }}
