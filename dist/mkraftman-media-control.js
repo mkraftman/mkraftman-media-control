@@ -10,7 +10,7 @@
  *  - Draggable seek thumb on progress bar
  *  - Right-aligned artwork with colour fade to left
  *  - Background resets to default on app change or return to home screen
- *  - Automatic artwork fetching from TVmaze for content without entity_picture
+ *  - Automatic artwork fetching from TVmaze (TV) and TMDB (movies) for content without entity_picture
  *  - Navigation-based stale data detection via WebSocket event subscription
  *
  * Config options:
@@ -24,6 +24,9 @@
  *   wake_command:       (optional) command to wake from idle (default: "select")
  *   roon_entity:        (optional) Roon media_player entity to use when the Apple TV
  *                       source is Roon (default: media_player.roon_tv_area)
+ *   tmdb_api_key:       (optional) TMDB v3 API key; enables a movie-artwork fallback
+ *                       (via TMDB) for titles TVmaze can't match. Without it, only
+ *                       TVmaze is used, exactly as before.
  *   buttons:            (optional) array of button definitions:
  *     - icon: mdi icon name
  *       command: remote command string (uses remote_entity)
@@ -164,12 +167,13 @@ class MkraftmanMediaControl extends HTMLElement {
     this._eventUnsub = null;
     this._staleCheckTimer = null;
 
-    // TVmaze artwork auto-fetch: when content plays without entity_picture,
-    // the card searches TVmaze by media_title and displays the result.
-    // Eliminates the need for external automations, shell_commands, and
-    // input_text helpers to provide fallback artwork.
-    this._tvmazeCache = {};       // title → image URL (persists within session)
-    this._fetchedArtwork = null;  // active TVmaze URL for current content
+    // Artwork auto-fetch: when content plays without entity_picture, the card
+    // searches TVmaze by title (TV shows) and, if a tmdb_api_key is configured,
+    // falls back to TMDB (movies) when TVmaze has no match. The result is shown
+    // as the background and drives colour extraction.
+    this._artworkCache = {};      // title → image URL, or null for a confirmed miss
+    this._artworkPending = null;  // title currently being looked up (dedupe in-flight)
+    this._fetchedArtwork = null;  // active artwork URL for current content
     this._artworkGeneration = 0;  // invalidates stale async fetch results
 
     // When true, suppress the knownApp bypass so the card falls back to
@@ -259,6 +263,7 @@ class MkraftmanMediaControl extends HTMLElement {
     this._colorGeneration = 0;
     this._fetchedArtwork = null;
     this._artworkGeneration = 0;
+    this._artworkPending = null;
     this._hass = null;
   }
 
@@ -357,9 +362,9 @@ class MkraftmanMediaControl extends HTMLElement {
     const artist = entity.attributes.media_artist || null;
     // Effective title mirrors _update(): some apps (e.g. certain Apple TV movie
     // apps) leave media_title blank and put the movie title in media_artist.
-    // Fall back to the artist so content-change detection and external (TVmaze)
-    // artwork lookup work for those too. When media_title is present this equals
-    // title, so all other content is unaffected.
+    // Fall back to the artist so content-change detection and external artwork
+    // lookup work for those too. When media_title is present this equals title,
+    // so all other content is unaffected.
     const effectiveTitle = title || artist;
     const dur = entity.attributes.media_duration;
     const phantom = entity.state === "playing" && dur > 0 && dur < 5;
@@ -460,10 +465,10 @@ class MkraftmanMediaControl extends HTMLElement {
       if (!this._confirmedApp) this._confirmedApp = app;
     }
 
-    // Auto-fetch artwork from TVmaze when playing content has a title but
-    // no entity_picture. Uses the effective title so movie apps that put the
-    // title in media_artist are searched too. Async: on success, sets
-    // _fetchedArtwork and calls _update() again. Cached per title within session.
+    // Auto-fetch artwork when playing content has a title but no entity_picture.
+    // Uses the effective title so movie apps that put the title in media_artist
+    // are searched too. Async: on success, sets _fetchedArtwork and calls
+    // _update() again. Cached per title within session.
     if (
       (entity.state === "playing" || entity.state === "buffering") &&
       !phantom && effectiveTitle && !pic
@@ -1209,9 +1214,9 @@ class MkraftmanMediaControl extends HTMLElement {
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
     } else if (this._fetchedArtwork && isTrulyActive) {
-      // TVmaze artwork — auto-fetched when no entity_picture available.
-      // If _extractColors succeeded on this URL, bgColor and gradient
-      // already reflect the artwork colours via _applyColors().
+      // Auto-fetched artwork (TVmaze for TV, TMDB for movies) — shown when no
+      // entity_picture is available. If _extractColors succeeded on this URL,
+      // bgColor and gradient already reflect the artwork colours via _applyColors().
       el.bgImage.style.backgroundImage = "url('" + this._fetchedArtwork + "')";
       el.bgImage.style.opacity = "1";
       this._updateBgSize();
@@ -1374,50 +1379,81 @@ class MkraftmanMediaControl extends HTMLElement {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  TVmaze artwork auto-fetch                                          */
+  /*  Artwork auto-fetch (TVmaze for TV, TMDB for movies)                */
   /* ------------------------------------------------------------------ */
 
   /**
-   * Fetch show artwork from TVmaze by title. Uses an in-memory cache
-   * (keyed by title) so each show is looked up at most once per session.
+   * Resolve and display fallback artwork for the current title when the media
+   * player provides no entity_picture. Looks up TVmaze first (TV shows) and, if
+   * a tmdb_api_key is configured, falls back to TMDB (movies) on a TVmaze miss.
    *
-   * On success: sets _fetchedArtwork, attempts _extractColors for colour-
-   * matched background, and calls _update() to display the artwork.
+   * Results are cached per title for the session — including confirmed misses
+   * (cached as null) so image-less content (e.g. some Paramount+ movies) doesn't
+   * re-query the APIs on every state update. In-flight lookups are de-duped via
+   * _artworkPending, and the _artworkGeneration counter (bumped by _clearColors)
+   * discards results that arrive after a content/app change.
    *
-   * On failure (no match, network error, CORS block): silently falls
-   * through to the app-logo fallback in _update().
-   *
-   * The _artworkGeneration counter (incremented by _clearColors) ensures
-   * that results arriving after a content/app change are discarded.
+   * On success: sets _fetchedArtwork, runs _extractColors for a colour-matched
+   * background, and calls _update(). On failure it falls through silently to the
+   * app-logo fallback in _update().
    */
   _fetchArtwork(title) {
     if (!title) return;
 
-    // Cache hit — use immediately
-    if (this._tvmazeCache[title]) {
-      if (this._fetchedArtwork !== this._tvmazeCache[title]) {
-        this._fetchedArtwork = this._tvmazeCache[title];
-        this._extractColors(this._fetchedArtwork);
+    // Already resolved this session (hit or confirmed miss) — no network call.
+    if (Object.prototype.hasOwnProperty.call(this._artworkCache, title)) {
+      const cached = this._artworkCache[title];
+      if (cached && this._fetchedArtwork !== cached) {
+        this._fetchedArtwork = cached;
+        this._extractColors(cached);
       }
       return;
     }
 
+    // De-dupe: a lookup for this exact title is already in flight.
+    if (this._artworkPending === title) return;
+    this._artworkPending = title;
     const gen = this._artworkGeneration;
 
-    fetch(
+    // TVmaze first (covers TV shows); TMDB second (covers movies) on a miss.
+    this._lookupTvmazeArtwork(title)
+      .then(url => {
+        if (gen !== this._artworkGeneration) return null;   // stale — stop early
+        return url ? url : this._lookupTmdbArtwork(title);
+      })
+      .then(url => {
+        if (this._artworkPending === title) this._artworkPending = null;
+        if (gen !== this._artworkGeneration) return;         // stale — discard
+        // Cache the outcome: a URL on success, null on a confirmed miss, so we
+        // don't re-query every update for content that has no artwork anywhere.
+        this._artworkCache[title] = url || null;
+        if (url) {
+          this._fetchedArtwork = url;
+          this._extractColors(url);
+          this._update();
+        }
+      })
+      .catch(() => {
+        // Network/parse error — leave uncached so a later update can retry.
+        if (this._artworkPending === title) this._artworkPending = null;
+      });
+  }
+
+  /**
+   * Look up landscape artwork from TVmaze by title. Resolves to an image URL,
+   * or null if there's no match (or on error). TVmaze is a TV database, so this
+   * is the primary source and covers TV shows.
+   */
+  _lookupTvmazeArtwork(title) {
+    return fetch(
       "https://api.tvmaze.com/singlesearch/shows?q=" +
         encodeURIComponent(title) + "&embed=images"
     )
-      .then(resp => {
-        if (!resp.ok || gen !== this._artworkGeneration) return null;
-        return resp.json();
-      })
+      .then(resp => (resp.ok ? resp.json() : null))
       .then(data => {
-        if (!data || gen !== this._artworkGeneration) return;
-
+        if (!data) return null;
         let url = null;
-
-        // Prefer background (landscape) images for the card's right-aligned artwork
+        // Prefer background (landscape) images for the right-aligned artwork
         const images = (data._embedded && data._embedded.images) || [];
         for (let i = 0; i < images.length; i++) {
           if (images[i].type === "background") {
@@ -1426,23 +1462,44 @@ class MkraftmanMediaControl extends HTMLElement {
             if (url) break;
           }
         }
-
         // Fall back to the show's main poster image
         if (!url && data.image) {
           url = data.image.original || data.image.medium;
         }
-
-        if (!url || gen !== this._artworkGeneration) return;
-
-        this._tvmazeCache[title] = url;
-        this._fetchedArtwork = url;
-        this._extractColors(url);
-        this._update();
+        return url || null;
       })
-      .catch(() => {
-        // Network error, CORS block, JSON parse failure — silently ignore.
-        // The card falls through to the app-logo fallback.
-      });
+      .catch(() => null);
+  }
+
+  /**
+   * Look up movie artwork from TMDB by title. Requires a tmdb_api_key in the
+   * card config (resolves to null when absent, disabling the fallback). Prefers
+   * the landscape backdrop, falling back to the portrait poster. Resolves to an
+   * image URL, or null on no match / error.
+   *
+   * The key is passed as an api_key query parameter (not an Authorization
+   * header) so the request stays a simple GET with no CORS preflight — the
+   * header form is what usually causes browser CORS failures against TMDB.
+   */
+  _lookupTmdbArtwork(title) {
+    const key = this._config && this._config.tmdb_api_key;
+    if (!key) return Promise.resolve(null);
+    return fetch(
+      "https://api.themoviedb.org/3/search/movie?api_key=" +
+        encodeURIComponent(key) + "&query=" + encodeURIComponent(title)
+    )
+      .then(resp => (resp.ok ? resp.json() : null))
+      .then(data => {
+        if (!data || !data.results || !data.results.length) return null;
+        const movie = data.results[0];
+        // Landscape backdrop suits the card's right-aligned artwork; fall back
+        // to the portrait poster when there's no backdrop.
+        const path = movie.backdrop_path || movie.poster_path;
+        if (!path) return null;
+        const size = movie.backdrop_path ? "w780" : "w500";
+        return "https://image.tmdb.org/t/p/" + size + path;
+      })
+      .catch(() => null);
   }
 
   /* ------------------------------------------------------------------ */
