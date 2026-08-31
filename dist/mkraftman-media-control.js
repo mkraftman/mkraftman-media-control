@@ -354,6 +354,13 @@ class MkraftmanMediaControl extends HTMLElement {
       entity.attributes.entity_picture_local ||
       null;
     const title = entity.attributes.media_title || null;
+    const artist = entity.attributes.media_artist || null;
+    // Effective title mirrors _update(): some apps (e.g. certain Apple TV movie
+    // apps) leave media_title blank and put the movie title in media_artist.
+    // Fall back to the artist so content-change detection and external (TVmaze)
+    // artwork lookup work for those too. When media_title is present this equals
+    // title, so all other content is unaffected.
+    const effectiveTitle = title || artist;
     const dur = entity.attributes.media_duration;
     const phantom = entity.state === "playing" && dur > 0 && dur < 5;
 
@@ -379,7 +386,7 @@ class MkraftmanMediaControl extends HTMLElement {
         // this, we'd re-extract colors and re-set _hadRealContent from stale data,
         // completely undoing the clear we just did.
         this._lastPicture = pic;
-        this._lastMediaTitle = title;
+        this._lastMediaTitle = effectiveTitle;
       }
       // else: suppressed — pyatv reported stale app_name while paused.
       // Don't clear; _confirmedApp will override in _update().
@@ -404,10 +411,10 @@ class MkraftmanMediaControl extends HTMLElement {
       this._prevMediaDuration = null;
     }
 
-    // Detect new content by change in picture OR media title
-    // Note: pic, title, dur, phantom computed above
+    // Detect new content by change in picture OR effective title
+    // Note: pic, title, artist, effectiveTitle, dur, phantom computed above
     const contentChanged =
-      (pic !== this._lastPicture) || (title !== this._lastMediaTitle);
+      (pic !== this._lastPicture) || (effectiveTitle !== this._lastMediaTitle);
 
     if (
       contentChanged &&
@@ -415,7 +422,7 @@ class MkraftmanMediaControl extends HTMLElement {
       !phantom
     ) {
       this._lastPicture = pic;
-      this._lastMediaTitle = title;
+      this._lastMediaTitle = effectiveTitle;
       // New content — reset live stream detection so progress bar works
       this._isLiveStream = false;
       this._prevMediaDuration = null;
@@ -425,10 +432,10 @@ class MkraftmanMediaControl extends HTMLElement {
         this._clearColors();
         // Restore tracking so we detect the next change
         this._lastPicture = pic;
-        this._lastMediaTitle = title;
+        this._lastMediaTitle = effectiveTitle;
       }
       // FIX 4: We've seen real content playing — mark it so paused state is trusted
-      if (title || pic) {
+      if (effectiveTitle || pic) {
         this._hadRealContent = true;
         this._navStale = false;
         this._confirmedApp = app;
@@ -437,14 +444,14 @@ class MkraftmanMediaControl extends HTMLElement {
       // Content changed while paused — stale data; clear, don't extract
       this._clearColors();
       this._hadRealContent = false;
-      this._lastMediaTitle = title;
+      this._lastMediaTitle = effectiveTitle;
       this._isLiveStream = false;
       this._prevMediaDuration = null;
     } else if ((!pic || phantom) && this._lastPicture) {
       this._lastPicture = null;
       this._clearColors();
       this._hadRealContent = false;
-    } else if (entity.state === "playing" && !phantom && (title || pic)) {
+    } else if (entity.state === "playing" && !phantom && (effectiveTitle || pic)) {
       // FIX 4: Catch the case where we transitioned playing→paused→playing with
       // the same content (no contentChanged), but _hadRealContent was lost (e.g.
       // after a reconnect). Re-mark it so paused detection works correctly next time.
@@ -454,13 +461,14 @@ class MkraftmanMediaControl extends HTMLElement {
     }
 
     // Auto-fetch artwork from TVmaze when playing content has a title but
-    // no entity_picture. Async: on success, sets _fetchedArtwork and calls
-    // _update() again to display the result. Cached per title within session.
+    // no entity_picture. Uses the effective title so movie apps that put the
+    // title in media_artist are searched too. Async: on success, sets
+    // _fetchedArtwork and calls _update() again. Cached per title within session.
     if (
       (entity.state === "playing" || entity.state === "buffering") &&
-      !phantom && title && !pic
+      !phantom && effectiveTitle && !pic
     ) {
-      this._fetchArtwork(title);
+      this._fetchArtwork(effectiveTitle);
     }
 
     this._update();
@@ -1038,6 +1046,16 @@ class MkraftmanMediaControl extends HTMLElement {
     const isOff = state === "off" || state === "unavailable";
     const hasRealPic = !!(m.entity_picture || m.entity_picture_local);
 
+    // Effective title: some apps (e.g. certain Apple TV movie apps) leave
+    // media_title blank and put the movie title in media_artist. Promote the
+    // artist into the title slot in that case. When media_title is present,
+    // effectiveTitle equals it, so all other content is unaffected. titleFromArtist
+    // records that the promotion happened, so we don't also show the artist line.
+    const rawTitle = m.media_title || "";
+    const rawArtist = m.media_artist || "";
+    const titleFromArtist = !rawTitle && !!rawArtist;
+    const effectiveTitle = rawTitle || (titleFromArtist ? rawArtist : "");
+
     // Roku reports "playing" with ~3s phantom durations during menu/home nav;
     // treat that as idle so we don't flip the icon, show fallback art, etc.
     const PHANTOM_THRESHOLD = 5;
@@ -1059,7 +1077,8 @@ class MkraftmanMediaControl extends HTMLElement {
     //   FIX 3: The old `(!hasRealPic && !!a.media_title)` check was too permissive;
     //   Apple TV retains media_title/entity_picture after content ends/returning home.
     //   We now require _hadRealContent to be set (proves we genuinely played this content)
-    //   before trusting a bare media_title in paused state.
+    //   before trusting a bare title in paused state. effectiveTitle covers movie apps
+    //   that put the title in media_artist.
     // - on Google TV only: valid progress info (duration + position) — Cast clears this
     //   reliably on home/app switch unlike Apple TV which keeps stale data
     const isGoogleTV = this._config.entity && this._config.entity.includes("google_tv");
@@ -1071,7 +1090,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // progress data across Cast sessions. _hadRealContent is only set when we
       // observe genuine playing state, so a real pause still passes through.
       || (hasRealPic && this._customBg && this._hadRealContent)
-      || (!hasRealPic && !!m.media_title && (isPlaying || this._hadRealContent))
+      || (!hasRealPic && !!effectiveTitle && (isPlaying || this._hadRealContent))
       || (isGoogleTV && hasProgress && this._hadRealContent));
 
     // Use _confirmedApp when the entity isn't playing and we have one —
@@ -1133,16 +1152,20 @@ class MkraftmanMediaControl extends HTMLElement {
         ? pendingApp
         : ((isTrulyActive || trustApp) ? (appName || friendlyName) : friendlyName));
 
-    // media info — only show title when truly active AND not showing stale data
-    const hasTitle = isTrulyActive && !showPending && !!m.media_title;
-    el.title.textContent = hasTitle ? m.media_title : "\u00A0";
+    // media info — only show the title row when truly active and not showing
+    // stale/pending data. effectiveTitle (computed above) promotes media_artist
+    // into the title slot for movie apps that leave media_title blank.
+    const hasTitle = isTrulyActive && !showPending && !!effectiveTitle;
+    el.title.textContent = hasTitle ? effectiveTitle : "\u00A0";
     el.title.style.visibility = hasTitle ? "visible" : "hidden";
 
-    // When real media is playing and an artist is reported, show the artist in
-    // the app-name position (left) and move the app name to the right edge.
-    const showArtist = hasTitle && !!m.media_artist;
+    // When real media is playing and a distinct artist is reported, show the
+    // artist in the app-name position (left) and move the app name to the right
+    // edge — but not when the artist was promoted into the title slot above,
+    // otherwise the movie title would appear twice.
+    const showArtist = hasTitle && !!rawArtist && !titleFromArtist;
     if (showArtist) {
-      el.name.textContent = m.media_artist;
+      el.name.textContent = rawArtist;
       el.nameRight.textContent = appText;
       el.nameRight.style.display = "";
     } else {
