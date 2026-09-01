@@ -6,7 +6,7 @@ A custom Lovelace media control card for Home Assistant with automatic artwork f
 
 ## Features
 
-- **Automatic artwork from TVmaze** — when content plays without artwork (common with BBC iPlayer, Hulu, Peacock), the card searches TVmaze by title and displays show artwork with colour-matched backgrounds. No automations, helpers, or scripts required.
+- **Automatic artwork from TVmaze (TV) and TMDB (movies)** — when content plays without artwork (common with BBC iPlayer, Hulu, Peacock, Paramount+), the card searches TVmaze by title for TV shows and, with an optional TMDB key, falls back to TMDB for movies — displaying artwork with colour-matched backgrounds. No automations, helpers, or scripts required. See [Movie artwork](#movie-artwork-tmdb-fallback).
 - **Navigation-based stale detection** — subscribes to HA WebSocket events to detect when Home/Top Menu commands are sent, automatically clearing stale media info that integrations like pyatv retain after the user navigates away.
 - **Colour-extracted backgrounds** — samples artwork colours to generate a tinted background with gradient fade, creating a cohesive look per show.
 - **Full-width transport controls** — configurable button row (skip back, previous, play/pause, next, skip forward) or custom remote commands.
@@ -49,6 +49,30 @@ roon_entity: media_player.roon_tv_area   # optional; this is the default
 
 > **Note:** if you switch away from Roon using the Apple TV's *own* remote (rather than the dashboard), no launch action runs to update the pending app, so the card stays in Roon mode until the pending app is changed. In a dashboard-driven setup this path doesn't occur.
 
+## Movie artwork (TMDB fallback)
+
+TVmaze is a TV database, so movies that play without their own `entity_picture` (some Paramount+ titles, for example) get no artwork from it. Providing an optional TMDB API key enables a movie-artwork fallback: when TVmaze returns no match for a title, the card searches [TMDB](https://www.themoviedb.org/) and uses the movie's landscape backdrop (falling back to the portrait poster).
+
+The fallback is entirely opt-in — without `tmdb_api_key` the card uses TVmaze exactly as before. TVmaze is always tried first, so TV shows are unaffected.
+
+### Requirements
+
+- A **TMDB v3 API key** (the ~32-character key, *not* the v4 "Read Access Token"). Create a free account at themoviedb.org, then go to **Settings → API** and copy the **API Key (v3 auth)**.
+- Add `tmdb_api_key` to the card config for any surface where image-less movies play.
+
+### Config
+
+```yaml
+type: custom:mkraftman-media-control
+entity: media_player.apple_tv_living_room
+tmdb_api_key: "your_tmdb_v3_api_key"
+```
+
+> **Notes**
+> - The key is passed to TMDB as a query parameter, so it's visible in the dashboard config and in the browser's network requests. For a local kiosk with a low-privilege read-only key this is low risk, but bear it in mind before adding it to publicly visible surfaces.
+> - Results are cached per title for the session — including "no match" outcomes — so image-less content doesn't repeatedly query the APIs.
+> - The colour-tinted background may be skipped for TMDB images if `image.tmdb.org` doesn't return CORS headers for the colour-sampling step. The artwork itself still displays regardless.
+
 ## Installation
 
 ### HACS (Recommended)
@@ -82,6 +106,7 @@ entity: media_player.apple_tv_living_room
 remote_entity: remote.apple_tv_living_room
 pending_app_entity: input_text.apple_tv_pending_app
 roon_entity: media_player.roon_tv_area
+tmdb_api_key: "your_tmdb_v3_api_key"
 image_entity: input_text.custom_image_override
 nav_commands:
   - home
@@ -111,7 +136,8 @@ buttons:
 | `remote_entity` | No | Derived from entity | The `remote` entity for send_command actions. If omitted, derived by replacing `media_player.` with `remote.` in the entity ID |
 | `pending_app_entity` | No | — | An `input_text` entity set by launch scripts to show the correct app name during transitions. Also drives Roon mode (see [Roon support](#roon-support-new-in-v2)) |
 | `roon_entity` | No | `media_player.roon_tv_area` | The Roon `media_player` entity the card switches to for media info and transport when the selected source is Roon. Roon mode is triggered by `pending_app_entity` reading `Roon`, so that option must also be set |
-| `image_entity` | No | — | An `input_text` entity providing an external image URL override. Takes priority over TVmaze auto-fetch. Retained for backward compatibility; most users won't need this |
+| `tmdb_api_key` | No | — | A [TMDB](https://www.themoviedb.org/) **v3** API key. Enables a movie-artwork fallback (via TMDB) for titles TVmaze can't match. Without it, only TVmaze is used. See [Movie artwork](#movie-artwork-tmdb-fallback) |
+| `image_entity` | No | — | An `input_text` entity providing an external image URL override. Takes priority over TVmaze/TMDB auto-fetch. Retained for backward compatibility; most users won't need this |
 | `nav_commands` | No | `["home", "top_menu"]` | Remote commands that trigger stale-data detection. Matched case-insensitively, so `home` matches Apple TV's `home`, Roku's `home`, and Google TV's `HOME` |
 | `stale_check_delay` | No | `2000` | Milliseconds to wait after a navigation command before checking for stale data. Allows time for new content to start playing |
 | `seekable` | No | `true` | Set to `false` to hide the seek thumb and disable seek-on-click |
@@ -135,16 +161,40 @@ The card resolves background artwork in this priority order:
 
 1. **Native artwork** — `entity_picture` from the integration, with extracted colours
 2. **External override** — URL from `image_entity` (if configured)
-3. **TVmaze auto-fetch** — searched by `media_title` when no `entity_picture` exists, cached per session
-4. **App logo** — from the built-in APP_IMAGE_MAP (Netflix, Disney+, BBC iPlayer, etc.)
-5. **Device logo** — from DEVICE_IMAGE_MAP based on entity ID (Apple TV, Roku, Google TV)
-6. **Hidden** — no background image
+3. **TVmaze auto-fetch (TV)** — searched by title when no `entity_picture` exists, cached per session
+4. **TMDB auto-fetch (movies)** — when TVmaze has no match and `tmdb_api_key` is set, searched by title; prefers the landscape backdrop, then the poster
+5. **App logo** — from the built-in APP_IMAGE_MAP (Netflix, Disney+, BBC iPlayer, etc.)
+6. **Device logo** — from DEVICE_IMAGE_MAP based on entity ID (Apple TV, Roku, Google TV)
+7. **Hidden** — no background image
 
 ### Supported app logos
 
 The card includes built-in logos for: Netflix, Prime Video, YouTube, Disney+, Apple Music, Spotify, Plex, BBC iPlayer, ITVX, Channel 4, My5, Paramount+, discovery+, HBO Max / Max, Hulu, DAZN, Roon, BBC Sounds, Apple TV, Starz, Sky Q, Peacock, UKTV Play — plus Android TV package name variants for all of the above.
 
 ## Changelog
+
+### v2.1.0
+
+**TMDB movie-artwork fallback**
+
+Added an optional TMDB fallback for movie artwork. TVmaze (a TV database) can't match movies, so titles playing without their own `entity_picture` — e.g. some Paramount+ movies — previously fell straight through to the app logo. When a `tmdb_api_key` is configured and TVmaze returns no match, the card now searches TMDB and uses the landscape backdrop (falling back to the poster).
+
+- Opt-in via the new `tmdb_api_key` option; without it, behaviour is unchanged (TVmaze only)
+- TVmaze is always tried first, so TV shows are unaffected
+- The key is sent as an `api_key` query parameter (a simple GET, so no CORS preflight)
+- The per-title artwork cache now records confirmed misses too, and an in-flight guard de-dupes lookups, so image-less content no longer re-queries the APIs on every state update
+
+### v2.0.5
+
+**Show the movie title when apps put it in `media_artist`**
+
+Some Apple TV movie apps populate only `media_artist` (with the movie title) and leave `media_title` blank. The card gated the title row on `media_title` and the artist row on the title, so neither rendered — only the artwork showed. The card now uses an effective title (`media_title`, falling back to `media_artist`): the movie title appears in the title slot, the separate artist line is suppressed so it isn't shown twice, and the effective title also drives content-change detection and the artwork lookup. When `media_title` is present, behaviour is unchanged.
+
+### v2.0.4
+
+**Documentation**
+
+Documented Roon support and the `roon_entity` option in the README. No code changes.
 
 ### v2.0.3
 
