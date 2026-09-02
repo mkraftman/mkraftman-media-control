@@ -27,6 +27,10 @@
  *   tmdb_api_key:       (optional) TMDB v3 API key; enables a movie-artwork fallback
  *                       (via TMDB) for titles TVmaze can't match. Without it, only
  *                       TVmaze is used, exactly as before.
+ *   tmdb_override_apps: (optional) array of app names (e.g. ["Paramount+"]) whose own
+ *                       entity_picture should be ignored in favour of the TVmaze→TMDB
+ *                       artwork cascade — for apps that supply poor per-title images.
+ *                       Most useful with tmdb_api_key set (so movies resolve via TMDB).
  *   buttons:            (optional) array of button definitions:
  *     - icon: mdi icon name
  *       command: remote command string (uses remote_entity)
@@ -354,10 +358,20 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Compute content attributes early — needed for both app-change and
     // content-change detection below.
-    const pic =
-      entity.attributes.entity_picture ||
-      entity.attributes.entity_picture_local ||
-      null;
+    const app = entity.attributes.app_name || null;
+    // Mirror _update()'s app resolution: while playing/buffering use the live
+    // app_name, otherwise fall back to the last confirmed app (pyatv reports a
+    // stale app_name when not playing). When that app is listed in
+    // tmdb_override_apps, ignore its native entity_picture so the card falls
+    // through to the TVmaze→TMDB cascade — some apps (e.g. Paramount+) supply
+    // poor per-title images rather than real poster/backdrop artwork.
+    const overrideApp = (entity.state === "playing" || entity.state === "buffering")
+      ? app : (this._confirmedApp || app);
+    const pic = this._isPictureOverriddenApp(overrideApp)
+      ? null
+      : (entity.attributes.entity_picture
+        || entity.attributes.entity_picture_local
+        || null);
     const title = entity.attributes.media_title || null;
     const artist = entity.attributes.media_artist || null;
     // Effective title mirrors _update(): some apps (e.g. certain Apple TV movie
@@ -370,7 +384,6 @@ class MkraftmanMediaControl extends HTMLElement {
     const phantom = entity.state === "playing" && dur > 0 && dur < 5;
 
     // Detect app change -> reset background and live stream flag
-    const app = entity.attributes.app_name || null;
     if (this._prevAppName !== undefined && app !== this._prevAppName) {
       // Only treat as genuine app change if the entity is actually playing
       // (new app started) or idle/off (left all apps). When paused with a
@@ -467,8 +480,9 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Auto-fetch artwork when playing content has a title but no entity_picture.
     // Uses the effective title so movie apps that put the title in media_artist
-    // are searched too. Async: on success, sets _fetchedArtwork and calls
-    // _update() again. Cached per title within session.
+    // are searched too. Also fires for tmdb_override_apps (whose native picture
+    // we deliberately nulled above). Async: on success, sets _fetchedArtwork and
+    // calls _update() again. Cached per title within session.
     if (
       (entity.state === "playing" || entity.state === "buffering") &&
       !phantom && effectiveTitle && !pic
@@ -1049,7 +1063,29 @@ class MkraftmanMediaControl extends HTMLElement {
     if (el.roonControls) el.roonControls.style.display = roonActive ? "" : "none";
 
     const isOff = state === "off" || state === "unavailable";
-    const hasRealPic = !!(m.entity_picture || m.entity_picture_local);
+
+    // Roku reports "playing" with ~3s phantom durations during menu/home nav;
+    // treat that as idle so we don't flip the icon, show fallback art, etc.
+    const PHANTOM_THRESHOLD = 5;
+    const MIN_DURATION = 60;
+    const isPhantomPlay = !roonActive && mState === "playing"
+      && m.media_duration > 0 && m.media_duration < PHANTOM_THRESHOLD;
+    const isPlaying = mState === "playing" && !isPhantomPlay;
+
+    // Resolve the current app early — needed for the artwork override below.
+    // Use _confirmedApp when the entity isn't playing and we have one; pyatv can
+    // report stale/wrong app_name during in-app menu navigation. In Roon mode
+    // the app is always "TV:Remote" (displayed as "Roon").
+    const rawApp = roonActive ? "TV:Remote"
+      : ((!isPlaying && this._confirmedApp) ? this._confirmedApp : a.app_name);
+
+    // When the current app is listed in tmdb_override_apps, ignore its native
+    // artwork so the card uses the TVmaze→TMDB cascade instead. Never override in
+    // Roon mode (Roon's art comes from the Roon entity). hasRealPic reflects the
+    // override so paused-state detection and the artwork branch behave as if the
+    // native picture were absent.
+    const overrideArt = !roonActive && this._isPictureOverriddenApp(rawApp);
+    const hasRealPic = !overrideArt && !!(m.entity_picture || m.entity_picture_local);
 
     // Effective title: some apps (e.g. certain Apple TV movie apps) leave
     // media_title blank and put the movie title in media_artist. Promote the
@@ -1060,14 +1096,6 @@ class MkraftmanMediaControl extends HTMLElement {
     const rawArtist = m.media_artist || "";
     const titleFromArtist = !rawTitle && !!rawArtist;
     const effectiveTitle = rawTitle || (titleFromArtist ? rawArtist : "");
-
-    // Roku reports "playing" with ~3s phantom durations during menu/home nav;
-    // treat that as idle so we don't flip the icon, show fallback art, etc.
-    const PHANTOM_THRESHOLD = 5;
-    const MIN_DURATION = 60;
-    const isPhantomPlay = !roonActive && mState === "playing"
-      && m.media_duration > 0 && m.media_duration < PHANTOM_THRESHOLD;
-    const isPlaying = mState === "playing" && !isPhantomPlay;
 
     // card off styling
     el.card.classList.toggle("off", isOff);
@@ -1098,11 +1126,7 @@ class MkraftmanMediaControl extends HTMLElement {
       || (!hasRealPic && !!effectiveTitle && (isPlaying || this._hadRealContent))
       || (isGoogleTV && hasProgress && this._hadRealContent));
 
-    // Use _confirmedApp when the entity isn't playing and we have one —
-    // pyatv can report stale/wrong app_name during in-app menu navigation.
-    // In Roon mode the app is always "TV:Remote" (displayed as "Roon").
-    const rawApp = roonActive ? "TV:Remote"
-      : ((!isPlaying && this._confirmedApp) ? this._confirmedApp : a.app_name);
+    // rawApp resolved above (needed for the artwork override).
     const appName = APP_DISPLAY_NAME[rawApp] || rawApp;
     // Whether the current app is recognised in APP_IMAGE_MAP (including package names)
     const knownApp = !!(rawApp && APP_IMAGE_MAP[rawApp]);
@@ -1186,8 +1210,10 @@ class MkraftmanMediaControl extends HTMLElement {
     el.album.style.display = showAlbum ? "" : "none";
     el.card.classList.toggle("three-line", showAlbum);
 
-    // artwork background — suppress during phantom plays and app transitions
-    const realPic = !isPhantomPlay && !showPending
+    // artwork background — suppress during phantom plays, app transitions, and
+    // for tmdb_override_apps (whose native art we deliberately ignore in favour
+    // of the TVmaze→TMDB cascade).
+    const realPic = (!isPhantomPlay && !showPending && !overrideArt)
       ? (m.entity_picture || m.entity_picture_local || null) : null;
     // image_entity: external image URL from an input_text helper (e.g. BBC iPlayer API)
     const imageEntity = this._config.image_entity
@@ -1381,6 +1407,19 @@ class MkraftmanMediaControl extends HTMLElement {
   /* ------------------------------------------------------------------ */
   /*  Artwork auto-fetch (TVmaze for TV, TMDB for movies)                */
   /* ------------------------------------------------------------------ */
+
+  /**
+   * True when the given app is listed in tmdb_override_apps — meaning its own
+   * entity_picture should be ignored so the card uses the TVmaze→TMDB artwork
+   * cascade instead. Matches the raw app value or its friendly display name, so
+   * either "Paramount+" or a package name can be configured.
+   */
+  _isPictureOverriddenApp(appValue) {
+    const list = this._config && this._config.tmdb_override_apps;
+    if (!Array.isArray(list) || !list.length || !appValue) return false;
+    const display = APP_DISPLAY_NAME[appValue] || appValue;
+    return list.includes(appValue) || list.includes(display);
+  }
 
   /**
    * Resolve and display fallback artwork for the current title when the media
