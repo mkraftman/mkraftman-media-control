@@ -1105,7 +1105,8 @@ class MkraftmanMediaControl extends HTMLElement {
     const isActive = ["playing", "paused", "buffering"].includes(mState) && !isPhantomPlay;
 
     // When paused, treat as active if:
-    // - we have extracted colours from a prior playing state (genuine pause), OR
+    // - there's real artwork (entity_picture) and we previously saw genuine
+    //   playback (_hadRealContent), OR
     // - there's a title but no pic — but ONLY if we previously saw real content
     //   (_hadRealContent) to avoid stale Apple TV attributes showing after returning home.
     //   FIX 3: The old `(!hasRealPic && !!a.media_title)` check was too permissive;
@@ -1118,12 +1119,15 @@ class MkraftmanMediaControl extends HTMLElement {
     const isGoogleTV = this._config.entity && this._config.entity.includes("google_tv");
     const hasProgress = m.media_duration > 0 && m.media_position !== undefined && m.media_position !== null;
     const isTrulyActive = isActive && (roonActive || isPlaying
-      // FIX: guard all paused-state branches with _hadRealContent to prevent
-      // stale Roku/Google TV attributes showing after content ends. Roku often
-      // stays paused with entity_picture + customBg intact; Google TV can retain
-      // progress data across Cast sessions. _hadRealContent is only set when we
-      // observe genuine playing state, so a real pause still passes through.
-      || (hasRealPic && this._customBg && this._hadRealContent)
+      // Guard the paused-state branches with _hadRealContent to prevent stale
+      // Roku/Google TV attributes showing after content ends. _hadRealContent is
+      // only set on genuine playback, and every path that clears _customBg also
+      // clears _hadRealContent, so a stale pause can't slip through.
+      // NOTE: the hasRealPic branch keys on _hadRealContent ALONE, not _customBg —
+      // very dark or monochrome key art (e.g. "The Godfather") never yields an
+      // extracted colour, so requiring _customBg would wrongly hide the title and
+      // progress bar on pause for those titles.
+      || (hasRealPic && this._hadRealContent)
       || (!hasRealPic && !!effectiveTitle && (isPlaying || this._hadRealContent))
       || (isGoogleTV && hasProgress && this._hadRealContent));
 
