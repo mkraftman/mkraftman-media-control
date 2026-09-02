@@ -73,6 +73,27 @@ tmdb_api_key: "your_tmdb_v3_api_key"
 > - Results are cached per title for the session — including "no match" outcomes — so image-less content doesn't repeatedly query the APIs.
 > - The colour-tinted background may be skipped for TMDB images if `image.tmdb.org` doesn't return CORS headers for the colour-sampling step. The artwork itself still displays regardless.
 
+### Overriding an app's own artwork
+
+Some apps *do* provide an `entity_picture`, but it isn't good artwork — for example, Paramount+ supplies a distinct per-title image for movies that isn't a real poster or backdrop. Because the card faithfully shows whatever `entity_picture` an app provides, there's normally no way to improve on it.
+
+`image_override_apps` fixes that: list the app names whose native image you want ignored, and the card treats those titles as if they had no `entity_picture` — running the same **TVmaze → TMDB** cascade (TVmaze first for TV, TMDB for movies).
+
+```yaml
+type: custom:mkraftman-media-control
+entity: media_player.apple_tv_living_room
+tmdb_api_key: "your_tmdb_v3_api_key"
+image_override_apps:
+  - Paramount+
+```
+
+Notes and trade-offs:
+
+- It's **app-wide** — every title from a listed app uses the fetch cascade, including TV episodes. If that app supplied good per-episode artwork for its TV content, you'll lose it in favour of a TVmaze show-level image. There's no per-content-type switch, because the card can't reliably tell a movie from an episode.
+- **Roon is never affected** (its artwork comes from the Roon entity).
+- If neither TVmaze nor TMDB finds a match, the card shows the **app logo** rather than the app's own image.
+- Movies need `tmdb_api_key` set; without it, a movie from an overridden app falls through to the logo (TVmaze won't match it).
+
 ## Installation
 
 ### HACS (Recommended)
@@ -107,6 +128,8 @@ remote_entity: remote.apple_tv_living_room
 pending_app_entity: input_text.apple_tv_pending_app
 roon_entity: media_player.roon_tv_area
 tmdb_api_key: "your_tmdb_v3_api_key"
+image_override_apps:
+  - Paramount+
 image_entity: input_text.custom_image_override
 nav_commands:
   - home
@@ -137,6 +160,7 @@ buttons:
 | `pending_app_entity` | No | — | An `input_text` entity set by launch scripts to show the correct app name during transitions. Also drives Roon mode (see [Roon support](#roon-support-new-in-v2)) |
 | `roon_entity` | No | `media_player.roon_tv_area` | The Roon `media_player` entity the card switches to for media info and transport when the selected source is Roon. Roon mode is triggered by `pending_app_entity` reading `Roon`, so that option must also be set |
 | `tmdb_api_key` | No | — | A [TMDB](https://www.themoviedb.org/) **v3** API key. Enables a movie-artwork fallback (via TMDB) for titles TVmaze can't match. Without it, only TVmaze is used. See [Movie artwork](#movie-artwork-tmdb-fallback) |
+| `image_override_apps` | No | — | Array of app names (e.g. `["Paramount+"]`) whose own `entity_picture` is ignored so the card uses the artwork cascade (TVmaze first, then TMDB) instead — for apps that supply poor per-title images. App-wide (affects that app's TV episodes too); movies need `tmdb_api_key`. See [Overriding an app's artwork](#overriding-an-apps-own-artwork) |
 | `image_entity` | No | — | An `input_text` entity providing an external image URL override. Takes priority over TVmaze/TMDB auto-fetch. Retained for backward compatibility; most users won't need this |
 | `nav_commands` | No | `["home", "top_menu"]` | Remote commands that trigger stale-data detection. Matched case-insensitively, so `home` matches Apple TV's `home`, Roku's `home`, and Google TV's `HOME` |
 | `stale_check_delay` | No | `2000` | Milliseconds to wait after a navigation command before checking for stale data. Allows time for new content to start playing |
@@ -167,11 +191,23 @@ The card resolves background artwork in this priority order:
 6. **Device logo** — from DEVICE_IMAGE_MAP based on entity ID (Apple TV, Roku, Google TV)
 7. **Hidden** — no background image
 
+> Apps listed in `image_override_apps` skip step 1 — their native `entity_picture` is ignored — so they resolve via steps 3–4 (with step 5 as the fallback).
+
 ### Supported app logos
 
 The card includes built-in logos for: Netflix, Prime Video, YouTube, Disney+, Apple Music, Spotify, Plex, BBC iPlayer, ITVX, Channel 4, My5, Paramount+, discovery+, HBO Max / Max, Hulu, DAZN, Roon, BBC Sounds, Apple TV, Starz, Sky Q, Peacock, UKTV Play — plus Android TV package name variants for all of the above.
 
 ## Changelog
+
+### v2.2.0
+
+**Override an app's own artwork (`image_override_apps`)**
+
+Some apps supply an `entity_picture` that isn't real title artwork — e.g. Paramount+ provides a distinct per-title image for movies that isn't a poster or backdrop. The card previously had no way to improve on a provided image. The new `image_override_apps` list names apps whose native image should be ignored, so those titles use the TVmaze → TMDB cascade instead.
+
+- App-wide: every title from a listed app uses the fetch cascade (TVmaze first, TMDB for movies). TV episodes from that app therefore also switch to fetched artwork, trading per-episode images for a TVmaze show-level one
+- Never affects Roon; unlisted apps are unchanged
+- A title neither source can match falls back to the app logo
 
 ### v2.1.0
 
