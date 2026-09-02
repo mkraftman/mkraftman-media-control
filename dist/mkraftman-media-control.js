@@ -14,24 +14,24 @@
  *  - Navigation-based stale data detection via WebSocket event subscription
  *
  * Config options:
- *   entity:             (required) media_player entity
- *   remote_entity:      (optional) remote entity for send_command actions
- *   image_entity:       (optional) input_text entity providing an external image URL override
- *   pending_app_entity: (optional) input_text entity for pending app display during transitions
- *   nav_commands:       (optional) override default navigation commands for stale detection
- *   stale_check_delay:  (optional) ms before stale check fires (default: 2000)
- *   seekable:           (optional) enable/disable seek bar (default: true)
- *   wake_command:       (optional) command to wake from idle (default: "select")
- *   roon_entity:        (optional) Roon media_player entity to use when the Apple TV
- *                       source is Roon (default: media_player.roon_tv_area)
- *   tmdb_api_key:       (optional) TMDB v3 API key; enables a movie-artwork fallback
- *                       (via TMDB) for titles TVmaze can't match. Without it, only
- *                       TVmaze is used, exactly as before.
- *   tmdb_override_apps: (optional) array of app names (e.g. ["Paramount+"]) whose own
- *                       entity_picture should be ignored in favour of the TVmaze→TMDB
- *                       artwork cascade — for apps that supply poor per-title images.
- *                       Most useful with tmdb_api_key set (so movies resolve via TMDB).
- *   buttons:            (optional) array of button definitions:
+ *   entity:              (required) media_player entity
+ *   remote_entity:       (optional) remote entity for send_command actions
+ *   image_entity:        (optional) input_text entity providing an external image URL override
+ *   pending_app_entity:  (optional) input_text entity for pending app display during transitions
+ *   nav_commands:        (optional) override default navigation commands for stale detection
+ *   stale_check_delay:   (optional) ms before stale check fires (default: 2000)
+ *   seekable:            (optional) enable/disable seek bar (default: true)
+ *   wake_command:        (optional) command to wake from idle (default: "select")
+ *   roon_entity:         (optional) Roon media_player entity to use when the Apple TV
+ *                        source is Roon (default: media_player.roon_tv_area)
+ *   tmdb_api_key:        (optional) TMDB v3 API key; enables a movie-artwork fallback
+ *                        (via TMDB) for titles TVmaze can't match. Without it, only
+ *                        TVmaze is used, exactly as before.
+ *   image_override_apps: (optional) array of app names (e.g. ["Paramount+"]) whose own
+ *                        entity_picture is ignored in favour of the artwork cascade
+ *                        (TVmaze first, then TMDB for movies) — for apps that supply
+ *                        poor per-title images. Movies need tmdb_api_key set.
+ *   buttons:             (optional) array of button definitions:
  *     - icon: mdi icon name
  *       command: remote command string (uses remote_entity)
  *     - primary: true  (play/pause button, auto-toggles icon)
@@ -362,9 +362,10 @@ class MkraftmanMediaControl extends HTMLElement {
     // Mirror _update()'s app resolution: while playing/buffering use the live
     // app_name, otherwise fall back to the last confirmed app (pyatv reports a
     // stale app_name when not playing). When that app is listed in
-    // tmdb_override_apps, ignore its native entity_picture so the card falls
-    // through to the TVmaze→TMDB cascade — some apps (e.g. Paramount+) supply
-    // poor per-title images rather than real poster/backdrop artwork.
+    // image_override_apps, ignore its native entity_picture so the card falls
+    // through to the artwork cascade (TVmaze first, then TMDB) — some apps
+    // (e.g. Paramount+) supply poor per-title images rather than real
+    // poster/backdrop artwork.
     const overrideApp = (entity.state === "playing" || entity.state === "buffering")
       ? app : (this._confirmedApp || app);
     const pic = this._isPictureOverriddenApp(overrideApp)
@@ -480,7 +481,7 @@ class MkraftmanMediaControl extends HTMLElement {
 
     // Auto-fetch artwork when playing content has a title but no entity_picture.
     // Uses the effective title so movie apps that put the title in media_artist
-    // are searched too. Also fires for tmdb_override_apps (whose native picture
+    // are searched too. Also fires for image_override_apps (whose native picture
     // we deliberately nulled above). Async: on success, sets _fetchedArtwork and
     // calls _update() again. Cached per title within session.
     if (
@@ -1079,11 +1080,11 @@ class MkraftmanMediaControl extends HTMLElement {
     const rawApp = roonActive ? "TV:Remote"
       : ((!isPlaying && this._confirmedApp) ? this._confirmedApp : a.app_name);
 
-    // When the current app is listed in tmdb_override_apps, ignore its native
-    // artwork so the card uses the TVmaze→TMDB cascade instead. Never override in
-    // Roon mode (Roon's art comes from the Roon entity). hasRealPic reflects the
-    // override so paused-state detection and the artwork branch behave as if the
-    // native picture were absent.
+    // When the current app is listed in image_override_apps, ignore its native
+    // artwork so the card uses the artwork cascade (TVmaze first, then TMDB)
+    // instead. Never override in Roon mode (Roon's art comes from the Roon
+    // entity). hasRealPic reflects the override so paused-state detection and
+    // the artwork branch behave as if the native picture were absent.
     const overrideArt = !roonActive && this._isPictureOverriddenApp(rawApp);
     const hasRealPic = !overrideArt && !!(m.entity_picture || m.entity_picture_local);
 
@@ -1211,8 +1212,8 @@ class MkraftmanMediaControl extends HTMLElement {
     el.card.classList.toggle("three-line", showAlbum);
 
     // artwork background — suppress during phantom plays, app transitions, and
-    // for tmdb_override_apps (whose native art we deliberately ignore in favour
-    // of the TVmaze→TMDB cascade).
+    // for image_override_apps (whose native art we deliberately ignore in favour
+    // of the artwork cascade).
     const realPic = (!isPhantomPlay && !showPending && !overrideArt)
       ? (m.entity_picture || m.entity_picture_local || null) : null;
     // image_entity: external image URL from an input_text helper (e.g. BBC iPlayer API)
@@ -1409,13 +1410,13 @@ class MkraftmanMediaControl extends HTMLElement {
   /* ------------------------------------------------------------------ */
 
   /**
-   * True when the given app is listed in tmdb_override_apps — meaning its own
-   * entity_picture should be ignored so the card uses the TVmaze→TMDB artwork
-   * cascade instead. Matches the raw app value or its friendly display name, so
-   * either "Paramount+" or a package name can be configured.
+   * True when the given app is listed in image_override_apps — meaning its own
+   * entity_picture should be ignored so the card uses the artwork cascade
+   * (TVmaze first, then TMDB) instead. Matches the raw app value or its friendly
+   * display name, so either "Paramount+" or a package name can be configured.
    */
   _isPictureOverriddenApp(appValue) {
-    const list = this._config && this._config.tmdb_override_apps;
+    const list = this._config && this._config.image_override_apps;
     if (!Array.isArray(list) || !list.length || !appValue) return false;
     const display = APP_DISPLAY_NAME[appValue] || appValue;
     return list.includes(appValue) || list.includes(display);
