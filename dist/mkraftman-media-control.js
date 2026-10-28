@@ -180,6 +180,11 @@ class MkraftmanMediaControl extends HTMLElement {
     this._fetchedArtwork = null;  // active artwork URL for current content
     this._artworkGeneration = 0;  // invalidates stale async fetch results
 
+    // image_entity URL whose colours were last extracted. The background shows
+    // the image_entity URL ahead of TVmaze/TMDB artwork, so the tint must come
+    // from it too (not from a fetched image the user never sees).
+    this._lastExternalPic = null;
+
     // When true, suppress the knownApp bypass so the card falls back to
     // device name/image instead of app name/image. Starts true because on
     // initial load, entity data may be stale and cannot be trusted until
@@ -479,16 +484,44 @@ class MkraftmanMediaControl extends HTMLElement {
       if (!this._confirmedApp) this._confirmedApp = app;
     }
 
-    // Auto-fetch artwork when playing content has a title but no entity_picture.
-    // Uses the effective title so movie apps that put the title in media_artist
-    // are searched too. Also fires for image_override_apps (whose native picture
-    // we deliberately nulled above). Async: on success, sets _fetchedArtwork and
-    // calls _update() again. Cached per title within session.
-    if (
-      (entity.state === "playing" || entity.state === "buffering") &&
-      !phantom && effectiveTitle && !pic
-    ) {
-      this._fetchArtwork(effectiveTitle);
+    // image_entity artwork (e.g. BBC iPlayer via input_text.bbc_iplayer_image)
+    // ranks above TVmaze/TMDB in _update(), so when it is set and there's no
+    // native picture, extract the background tint from it and skip the
+    // TVmaze/TMDB lookup — otherwise the tint would come from a fetched image
+    // that isn't the one displayed. Re-extracts only when the URL changes.
+    const externalPic = this._externalPic();
+    const activeState = ["playing", "buffering", "paused"].includes(entity.state) && !phantom;
+    if (externalPic && !pic && activeState) {
+      if (externalPic !== this._lastExternalPic) {
+        this._lastExternalPic = externalPic;
+        // Discard any in-flight extraction of another image (e.g. a TVmaze
+        // result that started loading before the helper was populated) and drop
+        // any tint already taken from it, so very dark art (which yields no
+        // colour) falls back to the default rather than keeping a wrong tint.
+        this._colorGeneration++;
+        this._customBg = null;
+        this._customFg = null;
+        this._applyColors();
+        this._extractColors(externalPic);
+      }
+    } else {
+      if (!externalPic && this._lastExternalPic) {
+        // image_entity was cleared while content continues: forget it, and drop
+        // _fetchedArtwork so a cached TVmaze/TMDB hit re-extracts its own tint.
+        this._lastExternalPic = null;
+        this._fetchedArtwork = null;
+      }
+      // Auto-fetch artwork when playing content has a title but no entity_picture.
+      // Uses the effective title so movie apps that put the title in media_artist
+      // are searched too. Also fires for image_override_apps (whose native picture
+      // we deliberately nulled above). Async: on success, sets _fetchedArtwork and
+      // calls _update() again. Cached per title within session.
+      if (
+        (entity.state === "playing" || entity.state === "buffering") &&
+        !phantom && effectiveTitle && !pic
+      ) {
+        this._fetchArtwork(effectiveTitle);
+      }
     }
 
     this._update();
@@ -1221,10 +1254,7 @@ class MkraftmanMediaControl extends HTMLElement {
     const realPic = (!isPhantomPlay && !showPending && !overrideArt)
       ? (m.entity_picture || m.entity_picture_local || null) : null;
     // image_entity: external image URL from an input_text helper (e.g. BBC iPlayer API)
-    const imageEntity = this._config.image_entity
-      && this._hass.states[this._config.image_entity];
-    const externalPic = imageEntity && imageEntity.state && imageEntity.state.length > 0
-      ? imageEntity.state : null;
+    const externalPic = this._externalPic();
     // In Roon mode, fall back to the Roon logo (rawApp is "TV:Remote") even
     // before playback starts — the launcher forces Roon mode, which bypasses
     // the pending-app path that would otherwise have drawn the logo.
@@ -1342,6 +1372,7 @@ class MkraftmanMediaControl extends HTMLElement {
     this._customFg = null;
     this._lastPicture = null;
     this._lastMediaTitle = null;
+    this._lastExternalPic = null;
     const el = this._el;
     if (el.bgImage) {
       el.bgImage.style.opacity = "0";
@@ -1419,6 +1450,12 @@ class MkraftmanMediaControl extends HTMLElement {
    * (TVmaze first, then TMDB) instead. Matches the raw app value or its friendly
    * display name, so either "Paramount+" or a package name can be configured.
    */
+  _externalPic() {
+    const id = this._config && this._config.image_entity;
+    const st = id && this._hass && this._hass.states[id];
+    return st && st.state && st.state.length > 0 ? st.state : null;
+  }
+
   _isPictureOverriddenApp(appValue) {
     const list = this._config && this._config.image_override_apps;
     if (!Array.isArray(list) || !list.length || !appValue) return false;
@@ -1449,7 +1486,8 @@ class MkraftmanMediaControl extends HTMLElement {
       const cached = this._artworkCache[title];
       if (cached && this._fetchedArtwork !== cached) {
         this._fetchedArtwork = cached;
-        this._extractColors(cached);
+        // image_entity artwork is displayed in preference — its tint wins.
+        if (!this._externalPic()) this._extractColors(cached);
       }
       return;
     }
@@ -1473,7 +1511,9 @@ class MkraftmanMediaControl extends HTMLElement {
         this._artworkCache[title] = url || null;
         if (url) {
           this._fetchedArtwork = url;
-          this._extractColors(url);
+          // If image_entity was populated while this lookup was in flight, its
+          // image is what's displayed, so don't overwrite its tint.
+          if (!this._externalPic()) this._extractColors(url);
           this._update();
         }
       })
