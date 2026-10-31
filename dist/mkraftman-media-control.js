@@ -516,9 +516,12 @@ class MkraftmanMediaControl extends HTMLElement {
       // are searched too. Also fires for image_override_apps (whose native picture
       // we deliberately nulled above). Async: on success, sets _fetchedArtwork and
       // calls _update() again. Cached per title within session.
+      // Skipped for generic titles ("Episode 2", "Chapter 3", "S1 E2") that
+      // identify nothing — e.g. Peacock reports only the episode number — since
+      // a database search on those returns an arbitrary unrelated show.
       if (
         (entity.state === "playing" || entity.state === "buffering") &&
-        !phantom && effectiveTitle && !pic
+        !phantom && effectiveTitle && !pic && !this._isGenericTitle(effectiveTitle)
       ) {
         this._fetchArtwork(effectiveTitle);
       }
@@ -1450,6 +1453,29 @@ class MkraftmanMediaControl extends HTMLElement {
    * (TVmaze first, then TMDB) instead. Matches the raw app value or its friendly
    * display name, so either "Paramount+" or a package name can be configured.
    */
+  /**
+   * True when a title is only an episode/part designator with nothing that
+   * names the programme — "Episode 2", "Ep. 2", "Chapter One", "Part II",
+   * "S1 E2", "S01E02", "Season 1, Episode 2". Searching TVmaze/TMDB for these
+   * returns an arbitrary show, so the artwork lookup is skipped. A number only
+   * counts when it follows a designator word, so real titles such as "V",
+   * "Seven" or "1917" are unaffected, and any other word left over (e.g.
+   * "One Mile: Chapter One") means it is a real title.
+   */
+  _isGenericTitle(title) {
+    if (!title) return false;
+    const num = "(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+      + "|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|[ivxlc]+)";
+    const designator = new RegExp(
+      "\\b(?:season|series|episode|ep|chapter|part|no)\\.?\\s*#?\\s*" + num + "\\b", "g");
+    const lower = String(title).toLowerCase();
+    const stripped = lower
+      .replace(designator, " ")
+      .replace(/\bs\d+\s*e\d+\b/g, " ");      // S1 E2 / S01E02
+    if (stripped === lower) return false;     // no designator at all
+    return stripped.replace(/[\s.,:;#()\[\]\-–—\/|]+/g, "").length === 0;
+  }
+
   _externalPic() {
     const id = this._config && this._config.image_entity;
     const st = id && this._hass && this._hass.states[id];
