@@ -580,6 +580,15 @@ class MkraftmanMediaControl extends HTMLElement {
         opacity: 0;
         transition: width 0.8s ease, opacity 0.8s ease;
       }
+      /* Dims artwork (not app logos) so bright images keep the text readable. */
+      .bg-shade {
+        position: absolute;
+        right: 0; top: 0; bottom: 0;
+        width: 0;
+        opacity: 0;
+        background: rgba(0, 0, 0, 0.35);
+        transition: width 0.8s ease, opacity 0.8s ease;
+      }
 
       /* --- player content --- */
       .player {
@@ -781,10 +790,13 @@ class MkraftmanMediaControl extends HTMLElement {
     const bgImage = document.createElement("div");
     bgImage.className = "bg-image";
 
+    const bgShade = document.createElement("div");
+    bgShade.className = "bg-shade";
+
     const bgGrad = document.createElement("div");
     bgGrad.className = "bg-gradient";
 
-    bg.append(bgColor, bgImage, bgGrad);
+    bg.append(bgColor, bgImage, bgShade, bgGrad);
 
     // player
     const player = document.createElement("div");
@@ -891,6 +903,7 @@ class MkraftmanMediaControl extends HTMLElement {
       card,
       bgColor,
       bgImage,
+      bgShade,
       bgGrad,
       name,
       nameRight,
@@ -943,6 +956,7 @@ class MkraftmanMediaControl extends HTMLElement {
       this._resizeTimeout = setTimeout(() => {
         for (const entry of entries) {
           this._cardHeight = entry.contentRect.height;
+          this._cardWidth = entry.contentRect.width;
         }
         this._updateBgSize();
       }, 250);
@@ -1270,34 +1284,27 @@ class MkraftmanMediaControl extends HTMLElement {
     // (#132532) shows until _extractColors finishes, then transitions
     // smoothly via CSS. _hadRealContent guards against stale artwork.
     if (realPic && (this._hadRealContent || roonActive)) {
-      el.bgImage.style.backgroundImage = "url('" + realPic + "')";
-      el.bgImage.style.opacity = "1";
-      this._updateBgSize();
+      this._showBgImage(realPic, true);
     } else if (externalPic) {
-      el.bgImage.style.backgroundImage = "url('" + externalPic + "')";
-      el.bgImage.style.opacity = "1";
-      this._updateBgSize();
+      this._showBgImage(externalPic, true);
     } else if (this._fetchedArtwork && isTrulyActive) {
       // Auto-fetched artwork (TVmaze for TV, TMDB for movies) — shown when no
       // entity_picture is available. If _extractColors succeeded on this URL,
       // bgColor and gradient already reflect the artwork colours via _applyColors().
-      el.bgImage.style.backgroundImage = "url('" + this._fetchedArtwork + "')";
-      el.bgImage.style.opacity = "1";
-      this._updateBgSize();
+      this._showBgImage(this._fetchedArtwork, true);
     } else if (fallbackPic) {
-      el.bgImage.style.backgroundImage = "url('" + fallbackPic + "')";
-      el.bgImage.style.opacity = "1";
-      this._updateBgSize();
+      // App logo: unchanged square box, no dimming.
+      this._showBgImage(fallbackPic, false);
     } else {
       // Show device image as default background, or hide if none
       const devicePic = this._deviceImage();
       if (devicePic) {
-        el.bgImage.style.backgroundImage = "url('" + devicePic + "')";
-        el.bgImage.style.opacity = "1";
-        this._updateBgSize();
+        this._showBgImage(devicePic, false);
       } else {
         el.bgImage.style.opacity = "0";
         el.bgImage.style.width = "0";
+        el.bgShade.style.opacity = "0";
+        el.bgShade.style.width = "0";
         el.bgGrad.style.opacity = "0";
         el.bgGrad.style.width = "0";
       }
@@ -1356,13 +1363,57 @@ class MkraftmanMediaControl extends HTMLElement {
     this.style.setProperty("--mc-fg", fg);
   }
 
+  /**
+   * Show an image in the right-hand background box. isArt = true for content
+   * artwork (4:3 box, dimmed, plain borders trimmed); false for app logos and
+   * the device image (square box, undimmed, as before v2.2.6).
+   */
+  _showBgImage(url, isArt) {
+    const el = this._el;
+    el.bgImage.style.backgroundImage = "url('" + url + "')";
+    el.bgImage.style.opacity = "1";
+    this._bgUrl = url;
+    this._bgIsArt = isArt;
+    this._updateBgSize();
+  }
+
   _updateBgSize() {
     const el = this._el;
     if (!el.bgImage || !this._cardHeight) return;
-    const h = this._cardHeight + "px";
-    el.bgImage.style.width = h;
-    el.bgGrad.style.width = h;
+    const H = this._cardHeight;
+    const W = this._bgIsArt
+      ? Math.min(Math.round(H * 4 / 3), this._cardWidth || Infinity)
+      : H;
+    el.bgImage.style.width = W + "px";
+    el.bgGrad.style.width = W + "px";
     el.bgGrad.style.opacity = "1";
+    el.bgShade.style.width = W + "px";
+    el.bgShade.style.opacity = this._bgIsArt ? "1" : "0";
+
+    // Cover the box with the image, but exclude any plain border strips that
+    // _extractColors found on this image (e.g. a pale edge on Apple key art).
+    const crop = this._artCrop;
+    if (this._bgIsArt && crop && crop.url === this._bgUrl
+        && (crop.l || crop.r || crop.t || crop.b)) {
+      const fw = 1 - crop.l - crop.r;   // kept fraction of width
+      const fh = 1 - crop.t - crop.b;   // kept fraction of height
+      const regionAspect = (crop.ar * fw) / fh;
+      let iw, ih, x, y;                 // rendered full-image size and offset
+      if (regionAspect > W / H) {
+        ih = H / fh; iw = ih * crop.ar;
+        x = -iw * crop.l - (iw * fw - W) / 2;
+        y = -ih * crop.t;
+      } else {
+        iw = W / fw; ih = iw / crop.ar;
+        x = -iw * crop.l;
+        y = -ih * crop.t - (ih * fh - H) / 2;
+      }
+      el.bgImage.style.backgroundSize = iw + "px " + ih + "px";
+      el.bgImage.style.backgroundPosition = x + "px " + y + "px";
+    } else {
+      el.bgImage.style.backgroundSize = "";
+      el.bgImage.style.backgroundPosition = "";
+    }
   }
 
   _clearColors() {
@@ -1381,11 +1432,60 @@ class MkraftmanMediaControl extends HTMLElement {
       el.bgImage.style.opacity = "0";
       el.bgImage.style.width = "0";
     }
+    if (el.bgShade) {
+      el.bgShade.style.opacity = "0";
+      el.bgShade.style.width = "0";
+    }
     if (el.bgGrad) {
       el.bgGrad.style.opacity = "0";
       el.bgGrad.style.width = "0";
     }
     this._applyColors();
+  }
+
+  /**
+   * Detect plain border strips (uniform columns/rows of any colour) along each
+   * edge of an image — e.g. a pale strip on Apple's key art, or letterbox bars.
+   * Samples the image at 128x128; a column/row counts as border when every
+   * pixel is close to its mean and to the outermost line's colour. Each side is
+   * capped at 12% so real artwork with a plain edge is only slightly zoomed.
+   * Returns fractions { l, r, t, b } plus the image aspect ratio `ar`.
+   */
+  _detectBorders(img) {
+    const N = 128, MAX = Math.round(N * 0.12), TOL = 40;
+    const c = document.createElement("canvas");
+    c.width = N; c.height = N;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0, N, N);
+    const d = ctx.getImageData(0, 0, N, N).data;
+    const px = (x, y) => { const i = (y * N + x) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+    const lineMean = (pts) => {
+      let r = 0, g = 0, b = 0;
+      for (const p of pts) { r += p[0]; g += p[1]; b += p[2]; }
+      return [r / pts.length, g / pts.length, b / pts.length];
+    };
+    const dist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+    const column = (x) => { const p = []; for (let y = 0; y < N; y++) p.push(px(x, y)); return p; };
+    const row = (y) => { const p = []; for (let x = 0; x < N; x++) p.push(px(x, y)); return p; };
+    const count = (lineAt) => {
+      const edge = lineMean(lineAt(0));
+      let k = 0;
+      for (; k < MAX; k++) {
+        const pts = lineAt(k);
+        const m = lineMean(pts);
+        if (dist(m, edge) > TOL) break;
+        if (pts.some(p => dist(p, m) > TOL)) break;
+      }
+      // One extra line removes the blended edge left by downscaling.
+      return k > 0 ? Math.min(k + 1, MAX) / N : 0;
+    };
+    return {
+      l: count(k => column(k)),
+      r: count(k => column(N - 1 - k)),
+      t: count(k => row(k)),
+      b: count(k => row(N - 1 - k)),
+      ar: img.naturalWidth / img.naturalHeight,
+    };
   }
 
   _extractColors(url) {
@@ -1398,6 +1498,14 @@ class MkraftmanMediaControl extends HTMLElement {
     img.onload = () => {
       // Stale extraction — a clear happened since we started loading
       if (gen !== this._colorGeneration) return;
+      // Border trim: find plain strips along each edge (applied in _updateBgSize).
+      let cropChanged = false;
+      try {
+        const crop = this._detectBorders(img);
+        crop.url = url;
+        this._artCrop = crop;
+        cropChanged = !!(crop.l || crop.r || crop.t || crop.b);
+      } catch (_) { /* canvas taint - no trim */ }
       try {
         const c = document.createElement("canvas");
         const ctx = c.getContext("2d");
@@ -1419,7 +1527,11 @@ class MkraftmanMediaControl extends HTMLElement {
             n++;
           }
         }
-        if (n === 0) return;
+        if (n === 0) {
+          // No usable colour (very dark/monochrome art), but still apply a trim.
+          if (cropChanged) this._update();
+          return;
+        }
 
         r = Math.round(r / n);
         g = Math.round(g / n);
