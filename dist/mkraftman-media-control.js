@@ -516,7 +516,7 @@ class MkraftmanMediaControl extends HTMLElement {
       // are searched too. Also fires for image_override_apps (whose native picture
       // we deliberately nulled above). Async: on success, sets _fetchedArtwork and
       // calls _update() again. Cached per title within session.
-      // Skipped for generic titles ("Episode 2", "Chapter 3", "S1 E2") that
+      // Skipped for generic titles ("Episode 2", "Chapter 3", "S1 E2", "Trailer") that
       // identify nothing — e.g. Peacock reports only the episode number — since
       // a database search on those returns an arbitrary unrelated show.
       if (
@@ -1597,6 +1597,9 @@ class MkraftmanMediaControl extends HTMLElement {
    */
   _isGenericTitle(title) {
     if (!title) return false;
+    // "Trailer" on its own (or "Trailer 2") names no programme: the Apple TV
+    // app reports trailers this way, and a search returns an unrelated show.
+    if (/^\s*trailer(?:\s*#?\s*\d+)?\s*$/i.test(String(title))) return true;
     const num = "(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
       + "|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|[ivxlc]+)";
     const designator = new RegExp(
