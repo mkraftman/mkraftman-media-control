@@ -1293,8 +1293,9 @@ class MkraftmanMediaControl extends HTMLElement {
       // bgColor and gradient already reflect the artwork colours via _applyColors().
       this._showBgImage(this._fetchedArtwork, true);
     } else if (fallbackPic) {
-      // App logo: unchanged square box, no dimming.
-      this._showBgImage(fallbackPic, false);
+      // App logo: 4:3 box and dimmed like artwork. Our own logos are already
+      // 4:3 and clean, so no border trimming.
+      this._showBgImage(fallbackPic, true, false);
     } else {
       // Show device image as default background, or hide if none
       const devicePic = this._deviceImage();
@@ -1365,16 +1366,48 @@ class MkraftmanMediaControl extends HTMLElement {
 
   /**
    * Show an image in the right-hand background box. isArt = true for content
-   * artwork (4:3 box, dimmed, plain borders trimmed); false for app logos and
-   * the device image (square box, undimmed, as before v2.2.6).
+   * artwork and app logos (4:3 box, dimmed); false for the device image
+   * (square box, undimmed, as before v2.2.6). trim = false skips the plain
+   * border detection (used for our own app logos).
    */
-  _showBgImage(url, isArt) {
+  _showBgImage(url, isArt, trim = true) {
     const el = this._el;
     el.bgImage.style.backgroundImage = "url('" + url + "')";
     el.bgImage.style.opacity = "1";
     this._bgUrl = url;
     this._bgIsArt = isArt;
+    if (isArt && trim) this._ensureBorderCrop(url);
     this._updateBgSize();
+  }
+
+  /**
+   * Measure plain border strips on `url` once (result kept in _artCrop, keyed
+   * by URL). On completion, re-lay-out if that image is still the one shown.
+   * A failed load or a tainted canvas records "no trim" so it isn't retried.
+   */
+  _ensureBorderCrop(url) {
+    if (this._artCrop && this._artCrop.url === url) return;
+    if (this._cropPending === url) return;
+    this._cropPending = url;
+    const noTrim = { url, l: 0, r: 0, t: 0, b: 0, ar: 1 };
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (this._cropPending === url) this._cropPending = null;
+      try {
+        const crop = this._detectBorders(img);
+        crop.url = url;
+        this._artCrop = crop;
+      } catch (_) {
+        this._artCrop = noTrim;   // canvas taint - show untrimmed
+      }
+      if (this._bgUrl === url) this._updateBgSize();
+    };
+    img.onerror = () => {
+      if (this._cropPending === url) this._cropPending = null;
+      this._artCrop = noTrim;
+    };
+    img.src = url;
   }
 
   _updateBgSize() {
@@ -1498,14 +1531,6 @@ class MkraftmanMediaControl extends HTMLElement {
     img.onload = () => {
       // Stale extraction — a clear happened since we started loading
       if (gen !== this._colorGeneration) return;
-      // Border trim: find plain strips along each edge (applied in _updateBgSize).
-      let cropChanged = false;
-      try {
-        const crop = this._detectBorders(img);
-        crop.url = url;
-        this._artCrop = crop;
-        cropChanged = !!(crop.l || crop.r || crop.t || crop.b);
-      } catch (_) { /* canvas taint - no trim */ }
       try {
         const c = document.createElement("canvas");
         const ctx = c.getContext("2d");
@@ -1527,11 +1552,7 @@ class MkraftmanMediaControl extends HTMLElement {
             n++;
           }
         }
-        if (n === 0) {
-          // No usable colour (very dark/monochrome art), but still apply a trim.
-          if (cropChanged) this._update();
-          return;
-        }
+        if (n === 0) return;
 
         r = Math.round(r / n);
         g = Math.round(g / n);
